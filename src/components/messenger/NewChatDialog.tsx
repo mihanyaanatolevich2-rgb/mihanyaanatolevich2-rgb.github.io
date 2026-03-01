@@ -83,78 +83,17 @@ const NewChatDialog = ({ open, onOpenChange, onChatCreated }: NewChatDialogProps
       return;
     }
 
-    // 2) Check if conversation already exists (single query)
-    const { data: myConvs, error: myConvsError } = await supabase
-      .from('conversation_participants')
-      .select('conversation_id')
-      .eq('user_id', user.id);
+    // 2) Create (or get) direct conversation atomically on backend
+    const { data: conversationId, error: createChatError } = await supabase
+      .rpc('create_or_get_direct_conversation', { target_user_id: targetUserId });
 
-    if (myConvsError) {
-      setError('Ошибка загрузки чатов');
-      setLoading(false);
-      return;
-    }
-
-    const myConversationIds = (myConvs ?? []).map((c) => c.conversation_id);
-
-    if (myConversationIds.length > 0) {
-      const { data: existingConv, error: existingConvError } = await supabase
-        .from('conversation_participants')
-        .select('conversation_id')
-        .eq('user_id', targetUserId)
-        .in('conversation_id', myConversationIds)
-        .maybeSingle();
-
-      if (existingConvError) {
-        setError('Ошибка проверки существующего чата');
-        setLoading(false);
-        return;
-      }
-
-      if (existingConv) {
-        onChatCreated(existingConv.conversation_id);
-        onOpenChange(false);
-        setEmail('');
-        setLoading(false);
-        return;
-      }
-    }
-
-    // 3) Create new conversation without SELECT (avoid RLS failure on return=representation)
-    const newConversationId = crypto.randomUUID();
-
-    const { error: convError } = await supabase
-      .from('conversations')
-      .insert({ id: newConversationId });
-
-    if (convError) {
+    if (createChatError || !conversationId) {
       setError('Ошибка создания чата');
       setLoading(false);
       return;
     }
 
-    // 4) Add participants step-by-step so policy checks pass reliably
-    const { error: selfParticipantError } = await supabase
-      .from('conversation_participants')
-      .insert({ conversation_id: newConversationId, user_id: user.id });
-
-    if (selfParticipantError) {
-      setError('Ошибка добавления участника');
-      setLoading(false);
-      return;
-    }
-
-    const { error: targetParticipantError } = await supabase
-      .from('conversation_participants')
-      .insert({ conversation_id: newConversationId, user_id: targetUserId });
-
-    if (targetParticipantError) {
-      setError('Ошибка добавления собеседника');
-      setLoading(false);
-      return;
-    }
-
-    onChatCreated(newConversationId);
+    onChatCreated(conversationId);
     onOpenChange(false);
     setEmail('');
     setLoading(false);
