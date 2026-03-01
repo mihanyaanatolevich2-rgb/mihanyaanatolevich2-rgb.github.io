@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Plus, LogOut, Search } from 'lucide-react';
+import { Plus, LogOut, Search, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import NewChatDialog from './NewChatDialog';
+import NewGroupDialog from './NewGroupDialog';
+import NotificationBell from './NotificationBell';
 
 interface ChatItem {
   id: string;
@@ -13,6 +15,7 @@ interface ChatItem {
   participantEmail: string;
   lastMessage?: string;
   lastMessageAt?: string;
+  isGroup?: boolean;
 }
 
 interface ChatListProps {
@@ -24,6 +27,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const { user, signOut } = useAuth();
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [showNewGroup, setShowNewGroup] = useState(false);
   const [search, setSearch] = useState('');
 
   const loadChats = async () => {
@@ -40,19 +44,37 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const chatItems: ChatItem[] = [];
 
     for (const convId of convIds) {
-      const { data: otherParticipants } = await supabase
-        .from('conversation_participants')
-        .select('user_id')
-        .eq('conversation_id', convId)
-        .neq('user_id', user.id);
-
-      if (!otherParticipants?.length) continue;
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('display_name, username')
-        .eq('user_id', otherParticipants[0].user_id)
+      // Check if group
+      const { data: conv } = await supabase
+        .from('conversations')
+        .select('name, is_group')
+        .eq('id', convId)
         .single();
+
+      let name = 'Unknown';
+      let email = '';
+      const isGroup = conv?.is_group || false;
+
+      if (isGroup) {
+        name = conv?.name || 'Группа';
+      } else {
+        const { data: otherParticipants } = await supabase
+          .from('conversation_participants')
+          .select('user_id')
+          .eq('conversation_id', convId)
+          .neq('user_id', user.id);
+
+        if (!otherParticipants?.length) continue;
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('display_name, username')
+          .eq('user_id', otherParticipants[0].user_id)
+          .single();
+
+        name = profile?.display_name || profile?.username || 'Unknown';
+        email = profile?.username || '';
+      }
 
       const { data: lastMsg } = await supabase
         .from('messages')
@@ -64,10 +86,11 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
 
       chatItems.push({
         id: convId,
-        participantName: profile?.display_name || profile?.username || 'Unknown',
-        participantEmail: profile?.username || '',
+        participantName: name,
+        participantEmail: email,
         lastMessage: lastMsg?.message_type !== 'text' ? `📎 ${lastMsg?.message_type}` : lastMsg?.content || '',
         lastMessageAt: lastMsg?.created_at,
+        isGroup,
       });
     }
 
@@ -84,7 +107,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     loadChats();
   }, [user]);
 
-  // Realtime updates for new messages
   useEffect(() => {
     const channel = supabase
       .channel('chat-list-updates')
@@ -107,6 +129,10 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
       <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
         <h2 className="text-lg font-semibold text-foreground">Чаты</h2>
         <div className="flex gap-1">
+          <NotificationBell onOpenChat={onSelectChat} />
+          <Button variant="ghost" size="icon" onClick={() => setShowNewGroup(true)} className="text-muted-foreground hover:text-primary">
+            <Users className="h-5 w-5" />
+          </Button>
           <Button variant="ghost" size="icon" onClick={() => setShowNewChat(true)} className="text-muted-foreground hover:text-primary">
             <Plus className="h-5 w-5" />
           </Button>
@@ -141,7 +167,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
           >
             <Avatar className="h-10 w-10 shrink-0">
               <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
-                {chat.participantName.charAt(0).toUpperCase()}
+                {chat.isGroup ? '👥' : chat.participantName.charAt(0).toUpperCase()}
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1 text-left">
@@ -164,6 +190,11 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         open={showNewChat}
         onOpenChange={setShowNewChat}
         onChatCreated={(id) => { onSelectChat(id); loadChats(); }}
+      />
+      <NewGroupDialog
+        open={showNewGroup}
+        onOpenChange={setShowNewGroup}
+        onGroupCreated={(id) => { onSelectChat(id); loadChats(); }}
       />
     </div>
   );

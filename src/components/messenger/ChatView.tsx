@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, Image, FileIcon, X } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
+import MessageReactions from './MessageReactions';
 
 interface Message {
   id: string;
@@ -27,6 +28,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [input, setInput] = useState('');
   const [partnerName, setPartnerName] = useState('');
   const [partnerId, setPartnerId] = useState('');
+  const [isGroup, setIsGroup] = useState(false);
+  const [groupName, setGroupName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -36,10 +39,24 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Load partner info
+  // Load conversation info
   useEffect(() => {
-    const loadPartner = async () => {
+    const loadConvInfo = async () => {
       if (!user) return;
+
+      const { data: conv } = await supabase
+        .from('conversations')
+        .select('name, is_group')
+        .eq('id', conversationId)
+        .single();
+
+      if (conv?.is_group) {
+        setIsGroup(true);
+        setGroupName(conv.name || 'Группа');
+        return;
+      }
+
+      setIsGroup(false);
       const { data } = await supabase
         .from('conversation_participants')
         .select('user_id')
@@ -57,7 +74,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         setPartnerName(profile?.display_name || profile?.username || 'Unknown');
       }
     };
-    loadPartner();
+    loadConvInfo();
   }, [conversationId, user]);
 
   // Load messages
@@ -139,6 +156,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const displayName = isGroup ? groupName : partnerName;
+
   const renderMessage = (msg: Message) => {
     const isOwn = msg.sender_id === user?.id;
 
@@ -163,6 +182,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           <p className="mt-1 text-[10px] text-muted-foreground">
             {new Date(msg.created_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}
           </p>
+          <MessageReactions messageId={msg.id} />
         </div>
       </div>
     );
@@ -173,7 +193,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       <VideoCall
         conversationId={conversationId}
         partnerId={partnerId}
-        partnerName={partnerName}
+        partnerName={displayName}
         isVideo={callType === 'video'}
         onEnd={() => setCallType(null)}
       />
@@ -189,18 +209,23 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </Button>
         <Avatar className="h-9 w-9">
           <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
-            {partnerName.charAt(0).toUpperCase()}
+            {displayName.charAt(0).toUpperCase()}
           </AvatarFallback>
         </Avatar>
         <div className="flex-1">
-          <p className="text-sm font-semibold text-foreground">{partnerName}</p>
+          <p className="text-sm font-semibold text-foreground">{displayName}</p>
+          {isGroup && <p className="text-xs text-muted-foreground">Группа</p>}
         </div>
-        <Button variant="ghost" size="icon" onClick={() => setCallType('audio')} className="text-muted-foreground hover:text-primary">
-          <Phone className="h-5 w-5" />
-        </Button>
-        <Button variant="ghost" size="icon" onClick={() => setCallType('video')} className="text-muted-foreground hover:text-primary">
-          <Video className="h-5 w-5" />
-        </Button>
+        {!isGroup && (
+          <>
+            <Button variant="ghost" size="icon" onClick={() => setCallType('audio')} className="text-muted-foreground hover:text-primary">
+              <Phone className="h-5 w-5" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => setCallType('video')} className="text-muted-foreground hover:text-primary">
+              <Video className="h-5 w-5" />
+            </Button>
+          </>
+        )}
       </div>
 
       {/* Messages */}
