@@ -175,6 +175,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_or_get_direct_conversation: {
+        Args: { target_user_id: string }
+        Returns: string
+      }
       get_my_conversation_ids: { Args: never; Returns: string[] }
     }
     Enums: {
