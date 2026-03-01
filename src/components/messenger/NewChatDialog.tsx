@@ -25,73 +25,136 @@ const NewChatDialog = ({ open, onOpenChange, onChatCreated }: NewChatDialogProps
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+
+    const searchValue = email.trim();
+    if (!searchValue) return;
+
     setError('');
     setLoading(true);
 
-    // Find user by email/username
-    const { data: targetProfile } = await supabase
+    // 1) Find target user by username (email) or display name
+    let targetUserId: string | null = null;
+
+    const { data: byUsername, error: byUsernameError } = await supabase
       .from('profiles')
       .select('user_id')
-      .eq('username', email.trim())
+      .eq('username', searchValue)
       .maybeSingle();
 
-    if (!targetProfile) {
-      setError('Пользователь не найден');
+    if (byUsernameError) {
+      setError('Ошибка поиска пользователя');
       setLoading(false);
       return;
     }
 
-    if (targetProfile.user_id === user.id) {
+    if (byUsername?.user_id) {
+      targetUserId = byUsername.user_id;
+    } else {
+      const { data: byDisplayName, error: byDisplayNameError } = await supabase
+        .from('profiles')
+        .select('user_id')
+        .ilike('display_name', `%${searchValue}%`)
+        .limit(2);
+
+      if (byDisplayNameError) {
+        setError('Ошибка поиска пользователя');
+        setLoading(false);
+        return;
+      }
+
+      if (!byDisplayName || byDisplayName.length === 0) {
+        setError('Пользователь не найден');
+        setLoading(false);
+        return;
+      }
+
+      if (byDisplayName.length > 1) {
+        setError('Найдено несколько пользователей. Уточните email/ник.');
+        setLoading(false);
+        return;
+      }
+
+      targetUserId = byDisplayName[0].user_id;
+    }
+
+    if (targetUserId === user.id) {
       setError('Нельзя написать самому себе');
       setLoading(false);
       return;
     }
 
-    // Check if conversation already exists
-    const { data: myConvs } = await supabase
+    // 2) Check if conversation already exists (single query)
+    const { data: myConvs, error: myConvsError } = await supabase
       .from('conversation_participants')
       .select('conversation_id')
       .eq('user_id', user.id);
 
-    if (myConvs) {
-      for (const conv of myConvs) {
-        const { data: otherInConv } = await supabase
-          .from('conversation_participants')
-          .select('user_id')
-          .eq('conversation_id', conv.conversation_id)
-          .eq('user_id', targetProfile.user_id)
-          .maybeSingle();
+    if (myConvsError) {
+      setError('Ошибка загрузки чатов');
+      setLoading(false);
+      return;
+    }
 
-        if (otherInConv) {
-          onChatCreated(conv.conversation_id);
-          onOpenChange(false);
-          setEmail('');
-          setLoading(false);
-          return;
-        }
+    const myConversationIds = (myConvs ?? []).map((c) => c.conversation_id);
+
+    if (myConversationIds.length > 0) {
+      const { data: existingConv, error: existingConvError } = await supabase
+        .from('conversation_participants')
+        .select('conversation_id')
+        .eq('user_id', targetUserId)
+        .in('conversation_id', myConversationIds)
+        .maybeSingle();
+
+      if (existingConvError) {
+        setError('Ошибка проверки существующего чата');
+        setLoading(false);
+        return;
+      }
+
+      if (existingConv) {
+        onChatCreated(existingConv.conversation_id);
+        onOpenChange(false);
+        setEmail('');
+        setLoading(false);
+        return;
       }
     }
 
-    // Create new conversation
-    const { data: newConv, error: convError } = await supabase
-      .from('conversations')
-      .insert({})
-      .select()
-      .single();
+    // 3) Create new conversation without SELECT (avoid RLS failure on return=representation)
+    const newConversationId = crypto.randomUUID();
 
-    if (convError || !newConv) {
+    const { error: convError } = await supabase
+      .from('conversations')
+      .insert({ id: newConversationId });
+
+    if (convError) {
       setError('Ошибка создания чата');
       setLoading(false);
       return;
     }
 
-    // Add participants
-    await supabase.from('conversation_participants').insert([
-      { conversation_id: newConv.id, user_id: user.id },
-      { conversation_id: newConv.id, user_id: targetProfile.user_id },
-    ]);
+    // 4) Add participants step-by-step so policy checks pass reliably
+    const { error: selfParticipantError } = await supabase
+      .from('conversation_participants')
+      .insert({ conversation_id: newConversationId, user_id: user.id });
 
-    onChatCreated(newConv.id);
+    if (selfParticipantError) {
+      setError('Ошибка добавления участника');
+      setLoading(false);
+      return;
+    }
+
+    const { error: targetParticipantError } = await supabase
+      .from('conversation_participants')
+      .insert({ conversation_id: newConversationId, user_id: targetUserId });
+
+    if (targetParticipantError) {
+      setError('Ошибка добавления собеседника');
+      setLoading(false);
+      return;
+    }
+
+    onChatCreated(newConversationId);
     onOpenChange(false);
     setEmail('');
     setLoading(false);
@@ -105,7 +168,7 @@ const NewChatDialog = ({ open, onOpenChange, onChatCreated }: NewChatDialogProps
         </DialogHeader>
         <form onSubmit={handleCreate} className="space-y-4">
           <Input
-            placeholder="Email собеседника"
+            placeholder="Email, ник или имя собеседника"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
