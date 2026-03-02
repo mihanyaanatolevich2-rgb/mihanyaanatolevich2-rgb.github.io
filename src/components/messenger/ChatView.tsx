@@ -1,11 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Mic, Square, Edit2, Trash2, TrashIcon, X, Check, Circle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
 import MessageReactions from './MessageReactions';
+import VoiceRecorder from './VoiceRecorder';
+import VideoCircleRecorder from './VideoCircleRecorder';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+  ContextMenuSeparator,
+} from '@/components/ui/context-menu';
+import { toast } from 'sonner';
 
 interface Message {
   id: string;
@@ -15,6 +25,8 @@ interface Message {
   file_url: string | null;
   file_name: string | null;
   created_at: string;
+  is_edited?: boolean;
+  deleted_for_all?: boolean;
 }
 
 interface ChatViewProps {
@@ -25,6 +37,7 @@ interface ChatViewProps {
 const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const [input, setInput] = useState('');
   const [partnerName, setPartnerName] = useState('');
   const [partnerId, setPartnerId] = useState('');
@@ -32,11 +45,23 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [groupName, setGroupName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [editText, setEditText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Mark as read
+  const markRead = async () => {
+    if (!user) return;
+    await supabase
+      .from('conversation_participants')
+      .update({ last_read_at: new Date().toISOString() })
+      .eq('conversation_id', conversationId)
+      .eq('user_id', user.id);
   };
 
   // Load conversation info
@@ -77,18 +102,27 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     loadConvInfo();
   }, [conversationId, user]);
 
-  // Load messages
+  // Load messages + deleted for me
   useEffect(() => {
-    const loadMessages = async () => {
-      const { data } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
-      if (data) setMessages(data);
+    const load = async () => {
+      if (!user) return;
+      const [{ data: msgs }, { data: deleted }] = await Promise.all([
+        supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('deleted_messages')
+          .select('message_id')
+          .eq('user_id', user.id),
+      ]);
+      if (msgs) setMessages(msgs);
+      if (deleted) setDeletedIds(new Set(deleted.map(d => d.message_id)));
+      markRead();
     };
-    loadMessages();
-  }, [conversationId]);
+    load();
+  }, [conversationId, user]);
 
   // Realtime messages
   useEffect(() => {
@@ -101,6 +135,22 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
         setMessages(prev => [...prev, payload.new as Message]);
+        markRead();
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${conversationId}`,
+      }, (payload) => {
+        setMessages(prev => prev.map(m => m.id === payload.new.id ? payload.new as Message : m));
+      })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'messages',
+      }, (payload) => {
+        setMessages(prev => prev.filter(m => m.id !== (payload.old as any).id));
       })
       .subscribe();
 
@@ -156,35 +206,110 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // Edit message
+  const startEdit = (msg: Message) => {
+    setEditingMessage(msg);
+    setEditText(msg.content || '');
+  };
+
+  const saveEdit = async () => {
+    if (!editingMessage || !editText.trim()) return;
+    await supabase
+      .from('messages')
+      .update({ content: editText.trim(), is_edited: true, edited_at: new Date().toISOString() })
+      .eq('id', editingMessage.id);
+    setEditingMessage(null);
+    setEditText('');
+  };
+
+  const cancelEdit = () => {
+    setEditingMessage(null);
+    setEditText('');
+  };
+
+  // Delete for me
+  const deleteForMe = async (msgId: string) => {
+    await supabase.from('deleted_messages').insert({ message_id: msgId, user_id: user!.id });
+    setDeletedIds(prev => new Set([...prev, msgId]));
+    toast.success('Сообщение скрыто');
+  };
+
+  // Delete for everyone (own messages only)
+  const deleteForAll = async (msgId: string) => {
+    await supabase.from('messages').delete().eq('id', msgId);
+    toast.success('Сообщение удалено для всех');
+  };
+
+  // Voice/video message sent
+  const onMediaSent = () => {
+    // Messages will arrive via realtime
+  };
+
   const displayName = isGroup ? groupName : partnerName;
+
+  const visibleMessages = messages.filter(m => !deletedIds.has(m.id) && !m.deleted_for_all);
 
   const renderMessage = (msg: Message) => {
     const isOwn = msg.sender_id === user?.id;
 
     return (
-      <div key={msg.id} className={`flex animate-fade-in ${isOwn ? 'justify-end' : 'justify-start'}`}>
-        <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${isOwn ? 'message-own rounded-br-md' : 'message-other rounded-bl-md'}`}>
-          {msg.message_type === 'text' && (
-            <p className="text-sm text-foreground whitespace-pre-wrap break-words">{msg.content}</p>
+      <ContextMenu key={msg.id}>
+        <ContextMenuTrigger>
+          <div className={`flex animate-fade-in ${isOwn ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${isOwn ? 'message-own rounded-br-md' : 'message-other rounded-bl-md'}`}>
+              {msg.message_type === 'text' && (
+                <p className="text-sm text-foreground whitespace-pre-wrap break-words">{msg.content}</p>
+              )}
+              {msg.message_type === 'image' && msg.file_url && (
+                <img src={msg.file_url} alt={msg.file_name || 'image'} className="max-w-full rounded-lg" />
+              )}
+              {(msg.message_type === 'video' || msg.message_type === 'video_circle') && msg.file_url && (
+                <video
+                  src={msg.file_url}
+                  controls
+                  className={`max-w-full ${msg.message_type === 'video_circle' ? 'rounded-full w-48 h-48 object-cover' : 'rounded-lg'}`}
+                />
+              )}
+              {msg.message_type === 'voice' && msg.file_url && (
+                <audio src={msg.file_url} controls className="max-w-full" />
+              )}
+              {msg.message_type === 'file' && msg.file_url && (
+                <a href={msg.file_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary hover:underline">
+                  <FileIcon className="h-4 w-4" />
+                  <span className="text-sm">{msg.file_name || 'Файл'}</span>
+                </a>
+              )}
+              <div className="flex items-center gap-1 mt-1">
+                <p className="text-[10px] text-muted-foreground">
+                  {new Date(msg.created_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+                {msg.is_edited && (
+                  <span className="text-[10px] text-muted-foreground italic">ред.</span>
+                )}
+              </div>
+              <MessageReactions messageId={msg.id} />
+            </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="bg-popover border-border">
+          {isOwn && msg.message_type === 'text' && (
+            <ContextMenuItem onClick={() => startEdit(msg)} className="gap-2">
+              <Edit2 className="h-4 w-4" /> Редактировать
+            </ContextMenuItem>
           )}
-          {msg.message_type === 'image' && msg.file_url && (
-            <img src={msg.file_url} alt={msg.file_name || 'image'} className="max-w-full rounded-lg" />
+          <ContextMenuItem onClick={() => deleteForMe(msg.id)} className="gap-2">
+            <TrashIcon className="h-4 w-4" /> Удалить для себя
+          </ContextMenuItem>
+          {isOwn && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => deleteForAll(msg.id)} className="gap-2 text-destructive">
+                <Trash2 className="h-4 w-4" /> Удалить для всех
+              </ContextMenuItem>
+            </>
           )}
-          {msg.message_type === 'video' && msg.file_url && (
-            <video src={msg.file_url} controls className="max-w-full rounded-lg" />
-          )}
-          {msg.message_type === 'file' && msg.file_url && (
-            <a href={msg.file_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary hover:underline">
-              <FileIcon className="h-4 w-4" />
-              <span className="text-sm">{msg.file_name || 'Файл'}</span>
-            </a>
-          )}
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {new Date(msg.created_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}
-          </p>
-          <MessageReactions messageId={msg.id} />
-        </div>
-      </div>
+        </ContextMenuContent>
+      </ContextMenu>
     );
   };
 
@@ -228,42 +353,72 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         )}
       </div>
 
+      {/* Edit bar */}
+      {editingMessage && (
+        <div className="flex items-center gap-2 border-b border-border bg-secondary px-4 py-2">
+          <Edit2 className="h-4 w-4 text-primary shrink-0" />
+          <span className="text-xs text-muted-foreground truncate flex-1">Редактирование</span>
+          <Button variant="ghost" size="icon" onClick={cancelEdit} className="h-6 w-6">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
-        {messages.map(renderMessage)}
+        {visibleMessages.map(renderMessage)}
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
-      <form onSubmit={sendMessage} className="flex items-center gap-2 border-t border-border px-4 py-3">
-        <input
-          ref={fileInputRef}
-          type="file"
-          onChange={handleFileUpload}
-          className="hidden"
-          accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip"
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          className="text-muted-foreground hover:text-primary shrink-0"
-        >
-          <Paperclip className="h-5 w-5" />
-        </Button>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={uploading ? 'Загрузка файла...' : 'Сообщение...'}
-          disabled={uploading}
-          className="flex-1 rounded-xl bg-secondary px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
-        />
-        <Button type="submit" size="icon" disabled={!input.trim()} className="gradient-primary text-primary-foreground shrink-0 rounded-xl">
-          <Send className="h-4 w-4" />
-        </Button>
-      </form>
+      {editingMessage ? (
+        <div className="flex items-center gap-2 border-t border-border px-4 py-3">
+          <input
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
+            autoFocus
+            className="flex-1 rounded-xl bg-secondary px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
+          />
+          <Button size="icon" onClick={saveEdit} disabled={!editText.trim()} className="gradient-primary text-primary-foreground shrink-0 rounded-xl">
+            <Check className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 border-t border-border px-4 py-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={handleFileUpload}
+            className="hidden"
+            accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="text-muted-foreground hover:text-primary shrink-0"
+          >
+            <Paperclip className="h-5 w-5" />
+          </Button>
+          <VoiceRecorder conversationId={conversationId} />
+          <VideoCircleRecorder conversationId={conversationId} />
+          <form onSubmit={sendMessage} className="flex flex-1 items-center gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={uploading ? 'Загрузка файла...' : 'Сообщение...'}
+              disabled={uploading}
+              className="flex-1 rounded-xl bg-secondary px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
+            />
+            <Button type="submit" size="icon" disabled={!input.trim()} className="gradient-primary text-primary-foreground shrink-0 rounded-xl">
+              <Send className="h-4 w-4" />
+            </Button>
+          </form>
+        </div>
+      )}
     </div>
   );
 };
