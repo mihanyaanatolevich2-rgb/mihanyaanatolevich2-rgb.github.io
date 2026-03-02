@@ -52,50 +52,23 @@ export type Database = {
           },
         ]
       }
-      contact_nicknames: {
-        Row: {
-          contact_user_id: string
-          created_at: string
-          id: string
-          nickname: string
-          user_id: string
-        }
-        Insert: {
-          contact_user_id: string
-          created_at?: string
-          id?: string
-          nickname: string
-          user_id: string
-        }
-        Update: {
-          contact_user_id?: string
-          created_at?: string
-          id?: string
-          nickname?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
       conversation_participants: {
         Row: {
           conversation_id: string
           id: string
           joined_at: string
-          last_read_at: string | null
           user_id: string
         }
         Insert: {
           conversation_id: string
           id?: string
           joined_at?: string
-          last_read_at?: string | null
           user_id: string
         }
         Update: {
           conversation_id?: string
           id?: string
           joined_at?: string
-          last_read_at?: string | null
           user_id?: string
         }
         Relationships: [
@@ -131,35 +104,6 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
-      }
-      deleted_messages: {
-        Row: {
-          created_at: string
-          id: string
-          message_id: string
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          message_id: string
-          user_id: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          message_id?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "deleted_messages_message_id_fkey"
-            columns: ["message_id"]
-            isOneToOne: false
-            referencedRelation: "messages"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       message_reactions: {
         Row: {
@@ -198,12 +142,9 @@ export type Database = {
           content: string | null
           conversation_id: string
           created_at: string
-          deleted_for_all: boolean
-          edited_at: string | null
           file_name: string | null
           file_url: string | null
           id: string
-          is_edited: boolean
           message_type: string
           sender_id: string
         }
@@ -211,12 +152,9 @@ export type Database = {
           content?: string | null
           conversation_id: string
           created_at?: string
-          deleted_for_all?: boolean
-          edited_at?: string | null
           file_name?: string | null
           file_url?: string | null
           id?: string
-          is_edited?: boolean
           message_type?: string
           sender_id: string
         }
@@ -224,12 +162,9 @@ export type Database = {
           content?: string | null
           conversation_id?: string
           created_at?: string
-          deleted_for_all?: boolean
-          edited_at?: string | null
           file_name?: string | null
           file_url?: string | null
           id?: string
-          is_edited?: boolean
           message_type?: string
           sender_id?: string
         }
