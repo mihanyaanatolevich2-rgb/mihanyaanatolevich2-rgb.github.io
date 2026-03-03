@@ -1,13 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Mic, Square, Edit2, Trash2, TrashIcon, X, Check, Circle } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
 import MessageReactions from './MessageReactions';
-import VoiceRecorder from './VoiceRecorder';
-import VideoCircleRecorder from './VideoCircleRecorder';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -240,10 +238,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     toast.success('Сообщение удалено для всех');
   };
 
-  // Voice/video message sent
-  const onMediaSent = () => {
-    // Messages will arrive via realtime
-  };
+
 
   const displayName = isGroup ? groupName : partnerName;
 
@@ -403,8 +398,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           >
             <Paperclip className="h-5 w-5" />
           </Button>
-          <VoiceRecorder conversationId={conversationId} />
-          <VideoCircleRecorder conversationId={conversationId} />
           <form onSubmit={sendMessage} className="flex flex-1 items-center gap-2">
             <input
               value={input}
