@@ -9,6 +9,7 @@ interface VideoCallProps {
   partnerId: string;
   partnerName: string;
   isVideo: boolean;
+  isCaller: boolean;
   onEnd: () => void;
 }
 
@@ -20,16 +21,18 @@ const ICE_SERVERS = {
   ],
 };
 
-const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, onEnd }: VideoCallProps) => {
+const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, onEnd }: VideoCallProps) => {
   const { user } = useAuth();
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideo);
   const [status, setStatus] = useState<'connecting' | 'connected' | 'ended'>('connecting');
+  const [callDuration, setCallDuration] = useState(0);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const endedRef = useRef(false);
 
   const sendSignal = useCallback(async (type: string, data: object) => {
     if (!user) return;
@@ -42,42 +45,64 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, onEnd }: V
     });
   }, [user, conversationId, partnerId]);
 
-  const initCall = useCallback(async () => {
-    if (!user) return;
+  const cleanup = useCallback(() => {
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    pcRef.current?.close();
+    pcRef.current = null;
+  }, []);
 
+  const hangUp = useCallback(() => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    sendSignal('hang-up', {});
+    cleanup();
+    setStatus('ended');
+    onEnd();
+  }, [sendSignal, cleanup, onEnd]);
+
+  // Setup peer connection and local stream
+  const setupPeerConnection = useCallback(async () => {
+    if (!user) return null;
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: isVideo,
+    });
+    localStreamRef.current = stream;
+    if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+    const pc = new RTCPeerConnection(ICE_SERVERS);
+    pcRef.current = pc;
+
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        sendSignal('ice-candidate', { candidate: e.candidate.toJSON() });
+      }
+    };
+
+    pc.ontrack = (e) => {
+      if (remoteVideoRef.current && e.streams[0]) {
+        remoteVideoRef.current.srcObject = e.streams[0];
+        setStatus('connected');
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+        hangUp();
+      }
+    };
+
+    return pc;
+  }, [user, isVideo, sendSignal, hangUp]);
+
+  // Caller: create offer
+  const startAsCalller = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: isVideo,
-      });
-      localStreamRef.current = stream;
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-
-      const pc = new RTCPeerConnection(ICE_SERVERS);
-      pcRef.current = pc;
-
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.onicecandidate = (e) => {
-        if (e.candidate) {
-          sendSignal('ice-candidate', { candidate: e.candidate.toJSON() });
-        }
-      };
-
-      pc.ontrack = (e) => {
-        if (remoteVideoRef.current && e.streams[0]) {
-          remoteVideoRef.current.srcObject = e.streams[0];
-          setStatus('connected');
-        }
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-          hangUp();
-        }
-      };
-
-      // Create offer
+      const pc = await setupPeerConnection();
+      if (!pc) return;
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await sendSignal('offer', { sdp: offer.sdp, type: offer.type });
@@ -85,14 +110,25 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, onEnd }: V
       console.error('Failed to start call:', err);
       onEnd();
     }
-  }, [user, isVideo, sendSignal, onEnd]);
+  }, [setupPeerConnection, sendSignal, onEnd]);
+
+  // Callee: wait for offer, then setup PC and answer
+  const startAsCallee = useCallback(async () => {
+    try {
+      await setupPeerConnection();
+      // PC is ready, will handle offer in signal listener
+    } catch (err) {
+      console.error('Failed to setup call:', err);
+      onEnd();
+    }
+  }, [setupPeerConnection, onEnd]);
 
   // Listen for signals
   useEffect(() => {
     if (!user) return;
 
     const channel = supabase
-      .channel(`call-${conversationId}`)
+      .channel(`call-${conversationId}-${user.id}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
@@ -105,38 +141,54 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, onEnd }: V
         const pc = pcRef.current;
         if (!pc) return;
 
-        if (signal.signal_type === 'offer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
-        } else if (signal.signal_type === 'answer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
-        } else if (signal.signal_type === 'ice-candidate') {
-          await pc.addIceCandidate(new RTCIceCandidate(signal.signal_data.candidate));
-        } else if (signal.signal_type === 'hang-up') {
-          hangUp();
+        try {
+          if (signal.signal_type === 'offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
+          } else if (signal.signal_type === 'answer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+          } else if (signal.signal_type === 'ice-candidate') {
+            await pc.addIceCandidate(new RTCIceCandidate(signal.signal_data.candidate));
+          } else if (signal.signal_type === 'hang-up') {
+            if (!endedRef.current) {
+              endedRef.current = true;
+              cleanup();
+              setStatus('ended');
+              onEnd();
+            }
+          }
+        } catch (err) {
+          console.error('Signal handling error:', err);
         }
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user, conversationId, sendSignal]);
+  }, [user, conversationId, sendSignal, cleanup, onEnd]);
 
+  // Init call based on role
   useEffect(() => {
-    initCall();
-    return () => {
-      localStreamRef.current?.getTracks().forEach(t => t.stop());
-      pcRef.current?.close();
-    };
+    if (isCaller) {
+      startAsCalller();
+    } else {
+      startAsCallee();
+    }
+    return cleanup;
   }, []);
 
-  const hangUp = () => {
-    sendSignal('hang-up', {});
-    localStreamRef.current?.getTracks().forEach(t => t.stop());
-    pcRef.current?.close();
-    setStatus('ended');
-    onEnd();
+  // Call timer
+  useEffect(() => {
+    if (status !== 'connected') return;
+    const interval = setInterval(() => setCallDuration(d => d + 1), 1000);
+    return () => clearInterval(interval);
+  }, [status]);
+
+  const formatDuration = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
   const toggleMute = () => {
@@ -157,26 +209,26 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, onEnd }: V
 
   return (
     <div className="flex h-full flex-col items-center justify-center bg-background relative">
-      {/* Remote video (full screen) */}
-      <video
-        ref={remoteVideoRef}
-        autoPlay
-        playsInline
-        className="absolute inset-0 h-full w-full object-cover"
-      />
+      <video ref={remoteVideoRef} autoPlay playsInline className="absolute inset-0 h-full w-full object-cover" />
 
-      {/* Overlay when no video */}
       {status === 'connecting' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80 z-10">
           <div className="h-20 w-20 rounded-full gradient-primary flex items-center justify-center mb-4 shadow-glow">
             <span className="text-3xl font-bold text-primary-foreground">{partnerName.charAt(0).toUpperCase()}</span>
           </div>
           <p className="text-lg font-semibold text-foreground">{partnerName}</p>
-          <p className="text-sm text-muted-foreground animate-pulse mt-1">Подключение...</p>
+          <p className="text-sm text-muted-foreground animate-pulse mt-1">
+            {isCaller ? 'Вызов...' : 'Подключение...'}
+          </p>
         </div>
       )}
 
-      {/* Local video (small) */}
+      {status === 'connected' && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-secondary/80 px-3 py-1 rounded-full">
+          <span className="text-xs text-foreground">{formatDuration(callDuration)}</span>
+        </div>
+      )}
+
       <video
         ref={localVideoRef}
         autoPlay
@@ -185,7 +237,6 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, onEnd }: V
         className="absolute bottom-24 right-4 h-32 w-24 rounded-xl object-cover border-2 border-border z-20"
       />
 
-      {/* Controls */}
       <div className="absolute bottom-6 z-20 flex gap-4">
         <Button
           onClick={toggleMute}

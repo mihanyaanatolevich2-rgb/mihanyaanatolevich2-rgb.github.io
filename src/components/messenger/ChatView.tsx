@@ -43,13 +43,15 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [groupName, setGroupName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
+  const [isCaller, setIsCaller] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<{ type: 'audio' | 'video' } | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editText, setEditText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (instant = false) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: instant ? 'instant' as any : 'smooth' });
   };
 
   // Mark as read
@@ -118,6 +120,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       if (msgs) setMessages(msgs);
       if (deleted) setDeletedIds(new Set(deleted.map(d => d.message_id)));
       markRead();
+      // Scroll to bottom instantly on load
+      setTimeout(() => scrollToBottom(true), 50);
     };
     load();
   }, [conversationId, user]);
@@ -154,6 +158,30 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
     return () => { supabase.removeChannel(channel); };
   }, [conversationId]);
+
+  // Listen for incoming calls
+  useEffect(() => {
+    if (!user || isGroup) return;
+
+    const channel = supabase
+      .channel(`incoming-call-${conversationId}-${user.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'call_signals',
+        filter: `receiver_id=eq.${user.id}`,
+      }, (payload) => {
+        const signal = payload.new as any;
+        if (signal.conversation_id !== conversationId) return;
+        if (signal.signal_type === 'offer' && !callType) {
+          // Determine call type from signal data
+          setIncomingCall({ type: 'audio' }); // default to audio
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user, conversationId, isGroup, callType]);
 
   useEffect(scrollToBottom, [messages]);
 
@@ -308,6 +336,22 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     );
   };
 
+  const startCall = (type: 'audio' | 'video') => {
+    setIsCaller(true);
+    setCallType(type);
+  };
+
+  const acceptCall = () => {
+    if (!incomingCall) return;
+    setIsCaller(false);
+    setCallType(incomingCall.type);
+    setIncomingCall(null);
+  };
+
+  const rejectCall = () => {
+    setIncomingCall(null);
+  };
+
   if (callType) {
     return (
       <VideoCall
@@ -315,7 +359,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         partnerId={partnerId}
         partnerName={displayName}
         isVideo={callType === 'video'}
-        onEnd={() => setCallType(null)}
+        isCaller={isCaller}
+        onEnd={() => { setCallType(null); setIsCaller(false); }}
       />
     );
   }
@@ -338,15 +383,34 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </div>
         {!isGroup && (
           <>
-            <Button variant="ghost" size="icon" onClick={() => setCallType('audio')} className="text-muted-foreground hover:text-primary">
+            <Button variant="ghost" size="icon" onClick={() => startCall('audio')} className="text-muted-foreground hover:text-primary">
               <Phone className="h-5 w-5" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => setCallType('video')} className="text-muted-foreground hover:text-primary">
+            <Button variant="ghost" size="icon" onClick={() => startCall('video')} className="text-muted-foreground hover:text-primary">
               <Video className="h-5 w-5" />
             </Button>
           </>
         )}
       </div>
+
+      {/* Incoming call banner */}
+      {incomingCall && (
+        <div className="flex items-center justify-between bg-primary/10 border-b border-border px-4 py-3 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Phone className="h-5 w-5 text-primary animate-pulse" />
+            <span className="text-sm font-medium text-foreground">{partnerName} звонит...</span>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={acceptCall} className="gradient-primary text-primary-foreground rounded-full px-4">
+              Ответить
+            </Button>
+            <Button size="sm" variant="destructive" onClick={rejectCall} className="rounded-full px-4">
+              Отклонить
+            </Button>
+          </div>
+        </div>
+      )}
+
 
       {/* Edit bar */}
       {editingMessage && (
