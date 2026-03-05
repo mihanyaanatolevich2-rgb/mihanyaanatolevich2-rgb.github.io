@@ -49,6 +49,20 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [editText, setEditText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [maxCharsPerLine, setMaxCharsPerLine] = useState(() => {
+    const saved = localStorage.getItem('msg-max-chars');
+    return saved ? Number(saved) : 40;
+  });
+
+  // Listen for settings changes
+  useEffect(() => {
+    const handler = () => {
+      const saved = localStorage.getItem('msg-max-chars');
+      if (saved) setMaxCharsPerLine(Number(saved));
+    };
+    window.addEventListener('msg-max-chars-changed', handler);
+    return () => window.removeEventListener('msg-max-chars-changed', handler);
+  }, []);
 
   const scrollToBottom = (instant = false) => {
     messagesEndRef.current?.scrollIntoView({ behavior: instant ? 'instant' as any : 'smooth' });
@@ -120,8 +134,12 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       if (msgs) setMessages(msgs);
       if (deleted) setDeletedIds(new Set(deleted.map(d => d.message_id)));
       markRead();
-      // Scroll to bottom instantly on load
-      setTimeout(() => scrollToBottom(true), 50);
+      // Scroll to bottom instantly on load - multiple attempts for reliability
+      requestAnimationFrame(() => {
+        scrollToBottom(true);
+        setTimeout(() => scrollToBottom(true), 100);
+        setTimeout(() => scrollToBottom(true), 300);
+      });
     };
     load();
   }, [conversationId, user]);
@@ -183,7 +201,10 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return () => { supabase.removeChannel(channel); };
   }, [user, conversationId, isGroup, callType]);
 
-  useEffect(scrollToBottom, [messages]);
+  // Scroll to bottom when new messages arrive
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages.length]);
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -281,7 +302,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           <div className={`flex animate-fade-in ${isOwn ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${isOwn ? 'message-own rounded-br-md' : 'message-other rounded-bl-md'}`}>
               {msg.message_type === 'text' && (
-                <p className="text-sm text-foreground whitespace-pre-wrap break-words">{msg.content}</p>
+                <p className="text-sm text-foreground whitespace-pre-wrap break-words overflow-hidden" style={{ maxWidth: `${maxCharsPerLine}ch` }}>{msg.content}</p>
               )}
               {msg.message_type === 'image' && msg.file_url && (
                 <img src={msg.file_url} alt={msg.file_name || 'image'} className="max-w-full rounded-lg" />

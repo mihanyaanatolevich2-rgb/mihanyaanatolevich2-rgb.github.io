@@ -52,12 +52,22 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const saved = localStorage.getItem('app-scale');
     return saved ? Number(saved) : 100;
   });
+  const [maxChars, setMaxChars] = useState(() => {
+    const saved = localStorage.getItem('msg-max-chars');
+    return saved ? Number(saved) : 40;
+  });
 
   // Apply scale
   useEffect(() => {
     document.documentElement.style.fontSize = `${scale}%`;
     localStorage.setItem('app-scale', String(scale));
   }, [scale]);
+
+  // Save max chars
+  useEffect(() => {
+    localStorage.setItem('msg-max-chars', String(maxChars));
+    window.dispatchEvent(new Event('msg-max-chars-changed'));
+  }, [maxChars]);
 
   const loadChats = useCallback(async () => {
     if (!user) return;
@@ -324,7 +334,20 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 </Button>
               </div>
             </div>
-            <Button variant="outline" onClick={() => { setScale(100); }} className="w-full">Сбросить масштаб</Button>
+            <div>
+              <label className="text-sm font-medium text-foreground mb-2 block">Символов в строке: {maxChars}</label>
+              <div className="flex items-center gap-3">
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setMaxChars(s => Math.max(15, s - 5))}>
+                  <ZoomOut className="h-4 w-4" />
+                </Button>
+                <Slider value={[maxChars]} onValueChange={([v]) => setMaxChars(v)} min={15} max={80} step={5} className="flex-1" />
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setMaxChars(s => Math.min(80, s + 5))}>
+                  <ZoomIn className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Ограничивает ширину текста сообщений (для длинных ссылок)</p>
+            </div>
+            <Button variant="outline" onClick={() => { setScale(100); setMaxChars(40); }} className="w-full">Сбросить всё</Button>
           </div>
         </DialogContent>
       </Dialog>

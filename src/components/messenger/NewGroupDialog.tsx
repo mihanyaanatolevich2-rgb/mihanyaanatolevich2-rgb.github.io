@@ -41,11 +41,7 @@ const NewGroupDialog = ({ open, onOpenChange, onGroupCreated }: NewGroupDialogPr
     }
 
     const { data } = await supabase
-      .from('profiles')
-      .select('user_id, display_name, username')
-      .or(`username.ilike.%${query}%,display_name.ilike.%${query}%`)
-      .neq('user_id', user?.id || '')
-      .limit(10);
+      .rpc('search_profiles', { search_term: query });
 
     if (data) {
       setSearchResults(data.filter(u => !selectedMembers.some(m => m.user_id === u.user_id)));

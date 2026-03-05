@@ -328,6 +328,15 @@ export type Database = {
         Returns: string
       }
       get_my_conversation_ids: { Args: never; Returns: string[] }
+      search_profiles: {
+        Args: { search_term: string }
+        Returns: {
+          avatar_url: string
+          display_name: string
+          user_id: string
+          username: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

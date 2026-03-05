@@ -32,49 +32,34 @@ const NewChatDialog = ({ open, onOpenChange, onChatCreated }: NewChatDialogProps
     setError('');
     setLoading(true);
 
-    // 1) Find target user by username (email) or display name
-    let targetUserId: string | null = null;
+    // Use search_profiles RPC to find user
+    const { data: results, error: searchError } = await supabase
+      .rpc('search_profiles', { search_term: searchValue });
 
-    const { data: byUsername, error: byUsernameError } = await supabase
-      .from('profiles')
-      .select('user_id')
-      .eq('username', searchValue)
-      .maybeSingle();
-
-    if (byUsernameError) {
+    if (searchError) {
       setError('Ошибка поиска пользователя');
       setLoading(false);
       return;
     }
 
-    if (byUsername?.user_id) {
-      targetUserId = byUsername.user_id;
+    let targetUserId: string | null = null;
+
+    if (!results || results.length === 0) {
+      setError('Пользователь не найден');
+      setLoading(false);
+      return;
+    }
+
+    // Exact match by username first
+    const exact = results.find((r: any) => r.username === searchValue);
+    if (exact) {
+      targetUserId = exact.user_id;
+    } else if (results.length === 1) {
+      targetUserId = results[0].user_id;
     } else {
-      const { data: byDisplayName, error: byDisplayNameError } = await supabase
-        .from('profiles')
-        .select('user_id')
-        .ilike('display_name', `%${searchValue}%`)
-        .limit(2);
-
-      if (byDisplayNameError) {
-        setError('Ошибка поиска пользователя');
-        setLoading(false);
-        return;
-      }
-
-      if (!byDisplayName || byDisplayName.length === 0) {
-        setError('Пользователь не найден');
-        setLoading(false);
-        return;
-      }
-
-      if (byDisplayName.length > 1) {
-        setError('Найдено несколько пользователей. Уточните email/ник.');
-        setLoading(false);
-        return;
-      }
-
-      targetUserId = byDisplayName[0].user_id;
+      setError('Найдено несколько пользователей. Уточните email/ник.');
+      setLoading(false);
+      return;
     }
 
     if (targetUserId === user.id) {
