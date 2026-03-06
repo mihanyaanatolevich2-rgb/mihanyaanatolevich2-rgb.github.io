@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn } from 'lucide-react';
+import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import NewChatDialog from './NewChatDialog';
 import NewGroupDialog from './NewGroupDialog';
 import {
@@ -56,12 +57,21 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const saved = localStorage.getItem('msg-max-chars');
     return saved ? Number(saved) : 40;
   });
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('app-theme') as 'dark' | 'light') || 'dark';
+  });
 
   // Apply scale
   useEffect(() => {
     document.documentElement.style.fontSize = `${scale}%`;
     localStorage.setItem('app-scale', String(scale));
   }, [scale]);
+
+  // Apply theme
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('app-theme', theme);
+  }, [theme]);
 
   // Save max chars
   useEffect(() => {
@@ -72,7 +82,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const loadChats = useCallback(async () => {
     if (!user) return;
 
-    // Batch: get all participants, conversations, profiles, nicknames, and last messages in parallel
     const { data: myParts } = await supabase
       .from('conversation_participants')
       .select('conversation_id, last_read_at')
@@ -83,7 +92,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const convIds = myParts.map(p => p.conversation_id);
     const lastReadMap = new Map(myParts.map(p => [p.conversation_id, p.last_read_at]));
 
-    // Parallel batch queries
     const [convRes, allPartsRes, nicknamesRes, messagesRes] = await Promise.all([
       supabase.from('conversations').select('id, name, is_group').in('id', convIds),
       supabase.from('conversation_participants').select('conversation_id, user_id').in('conversation_id', convIds),
@@ -97,7 +105,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const allParts = allPartsRes.data || [];
     const nicknameMap = new Map(nicknamesRes.data?.map(n => [n.contact_user_id, n.nickname]) || []);
 
-    // Build last message per conversation
     const lastMsgMap = new Map<string, typeof messagesRes.data extends (infer T)[] ? T : never>();
     for (const msg of (messagesRes.data || [])) {
       if (!lastMsgMap.has(msg.conversation_id)) {
@@ -105,7 +112,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
       }
     }
 
-    // Collect unique other user IDs for profile lookup
     const otherUserIds = new Set<string>();
     const convPartsMap = new Map<string, string[]>();
     for (const p of allParts) {
@@ -115,7 +121,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
       convPartsMap.set(p.conversation_id, arr);
     }
 
-    // Batch fetch profiles
     const profileMap = new Map<string, { display_name: string | null; username: string }>();
     if (otherUserIds.size > 0) {
       const { data: profiles } = await supabase
@@ -127,8 +132,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
       }
     }
 
-    // Count unread per conversation in one query
-    // We'll compute it from messages data we already have
     const unreadMap = new Map<string, number>();
     for (const msg of (messagesRes.data || [])) {
       if (msg.sender_id === user.id) continue;
@@ -200,7 +203,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     return () => { supabase.removeChannel(channel); };
   }, [loadChats]);
 
-  // When selecting a chat, immediately clear its unread badge
   const handleSelectChat = (chatId: string) => {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, unreadCount: 0 } : c));
     onSelectChat(chatId);
@@ -322,6 +324,15 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         <DialogContent className="bg-card border-border sm:max-w-sm">
           <DialogHeader><DialogTitle className="text-foreground">Настройки</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            {/* Theme toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {theme === 'dark' ? <Moon className="h-4 w-4 text-muted-foreground" /> : <Sun className="h-4 w-4 text-muted-foreground" />}
+                <label className="text-sm font-medium text-foreground">Светлая тема</label>
+              </div>
+              <Switch checked={theme === 'light'} onCheckedChange={(checked) => setTheme(checked ? 'light' : 'dark')} />
+            </div>
+
             <div>
               <label className="text-sm font-medium text-foreground mb-2 block">Масштаб интерфейса: {scale}%</label>
               <div className="flex items-center gap-3">
@@ -347,7 +358,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
               </div>
               <p className="text-xs text-muted-foreground mt-1">Ограничивает ширину текста сообщений (для длинных ссылок)</p>
             </div>
-            <Button variant="outline" onClick={() => { setScale(100); setMaxChars(40); }} className="w-full">Сбросить всё</Button>
+            <Button variant="outline" onClick={() => { setScale(100); setMaxChars(40); setTheme('dark'); }} className="w-full">Сбросить всё</Button>
           </div>
         </DialogContent>
       </Dialog>
