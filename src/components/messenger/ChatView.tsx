@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
@@ -25,6 +25,7 @@ interface Message {
   created_at: string;
   is_edited?: boolean;
   deleted_for_all?: boolean;
+  reply_to_id?: string | null;
 }
 
 interface ChatViewProps {
@@ -48,10 +49,13 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [incomingCall, setIncomingCall] = useState<{ type: 'audio' | 'video' } | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editText, setEditText] = useState('');
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [readByMap, setReadByMap] = useState<Map<string, string[]>>(new Map());
+  const [participantNames, setParticipantNames] = useState<Map<string, string>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [maxCharsPerLine, setMaxCharsPerLine] = useState(() => {
     const saved = localStorage.getItem('msg-max-chars');
     return saved ? Number(saved) : 40;
@@ -82,7 +86,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     }
   };
 
-  // Mark as read - both last_read_at and individual message read receipts
+  // Mark as read
   const markRead = async () => {
     if (!user) return;
     await supabase
@@ -96,8 +100,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     if (!user) return;
     const unreadFromOthers = msgs.filter(m => m.sender_id !== user.id);
     if (unreadFromOthers.length === 0) return;
-    
-    // Batch insert read receipts, ignore conflicts
     const rows = unreadFromOthers.map(m => ({ message_id: m.id, user_id: user.id }));
     await supabase.from('message_read_by').upsert(rows, { onConflict: 'message_id,user_id', ignoreDuplicates: true });
   };
@@ -135,6 +137,25 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       if (conv?.is_group) {
         setIsGroup(true);
         setGroupName(conv.name || 'Группа');
+        // Load participant names for group
+        const { data: parts } = await supabase
+          .from('conversation_participants')
+          .select('user_id')
+          .eq('conversation_id', conversationId);
+        if (parts) {
+          const ids = parts.map(p => p.user_id);
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('user_id, display_name, username')
+            .in('user_id', ids);
+          if (profiles) {
+            const names = new Map<string, string>();
+            for (const p of profiles) {
+              names.set(p.user_id, p.display_name || p.username || 'Unknown');
+            }
+            setParticipantNames(names);
+          }
+        }
         return;
       }
 
@@ -155,6 +176,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           .single();
         setPartnerName(profile?.display_name || profile?.username || 'Unknown');
         setPartnerLastSeen(profile?.last_seen_at || null);
+        // Also store partner name for reply display
+        const names = new Map<string, string>();
+        names.set(data.user_id, profile?.display_name || profile?.username || 'Unknown');
+        if (user) names.set(user.id, 'Вы');
+        setParticipantNames(names);
       }
     };
     loadConvInfo();
@@ -190,12 +216,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           .eq('user_id', user.id),
       ]);
       if (msgs) {
-        setMessages(msgs);
-        markMessagesRead(msgs);
+        setMessages(msgs as Message[]);
+        markMessagesRead(msgs as Message[]);
       }
       if (deleted) setDeletedIds(new Set(deleted.map(d => d.message_id)));
       markRead();
-      // Use setTimeout to ensure DOM is updated before scrolling
       setTimeout(() => scrollToBottom(true), 50);
       setTimeout(() => scrollToBottom(true), 200);
     };
@@ -294,13 +319,16 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
     const content = input.trim();
     setInput('');
+    const replyId = replyTo?.id || null;
+    setReplyTo(null);
 
     await supabase.from('messages').insert({
       conversation_id: conversationId,
       sender_id: user.id,
       content,
       message_type: 'text',
-    });
+      reply_to_id: replyId,
+    } as any);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -338,6 +366,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const startEdit = (msg: Message) => {
     setEditingMessage(msg);
     setEditText(msg.content || '');
+    setReplyTo(null);
   };
 
   const saveEdit = async () => {
@@ -366,6 +395,40 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     toast.success('Сообщение удалено для всех');
   };
 
+  const startReply = (msg: Message) => {
+    setReplyTo(msg);
+    setEditingMessage(null);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const cancelReply = () => {
+    setReplyTo(null);
+  };
+
+  const downloadFile = async (url: string, filename: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename || 'download';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    } catch {
+      toast.error('Ошибка при скачивании');
+    }
+  };
+
+  // Format time from ISO string properly
+  const formatMessageTime = (isoString: string) => {
+    const date = new Date(isoString);
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    return `${hours}:${minutes}`;
+  };
+
   // Format last seen
   const formatLastSeen = (lastSeen: string | null) => {
     if (!lastSeen) return '';
@@ -376,7 +439,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
     if (diffMin < 2) return 'в сети';
     
-    const timeStr = date.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+    const timeStr = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
     
     const isToday = date.toDateString() === now.toDateString();
     const yesterday = new Date(now);
@@ -393,41 +456,105 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const displayName = isGroup ? groupName : partnerName;
   const visibleMessages = messages.filter(m => !deletedIds.has(m.id) && !m.deleted_for_all);
 
+  // Get reply message by id
+  const getReplyMessage = (replyId: string | null | undefined): Message | undefined => {
+    if (!replyId) return undefined;
+    return messages.find(m => m.id === replyId);
+  };
+
+  const getSenderName = (senderId: string) => {
+    if (senderId === user?.id) return 'Вы';
+    return participantNames.get(senderId) || 'Unknown';
+  };
+
+  const scrollToMessage = (msgId: string) => {
+    const el = document.getElementById(`msg-${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('bg-primary/10');
+      setTimeout(() => el.classList.remove('bg-primary/10'), 1500);
+    }
+  };
+
   const renderMessage = (msg: Message) => {
     const isOwn = msg.sender_id === user?.id;
     const readers = readByMap.get(msg.id) || [];
     const isRead = isOwn && readers.length > 0;
+    const repliedMsg = getReplyMessage(msg.reply_to_id);
 
     return (
       <ContextMenu key={msg.id}>
         <ContextMenuTrigger>
-          <div className={`flex animate-fade-in ${isOwn ? 'justify-end' : 'justify-start'}`}>
+          <div id={`msg-${msg.id}`} className={`flex animate-fade-in transition-colors duration-500 ${isOwn ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${isOwn ? 'message-own rounded-br-md' : 'message-other rounded-bl-md'}`}>
+              {/* Reply preview */}
+              {repliedMsg && (
+                <div
+                  className="mb-1.5 border-l-2 border-primary pl-2 py-1 cursor-pointer rounded-r bg-primary/5"
+                  onClick={() => scrollToMessage(repliedMsg.id)}
+                >
+                  <p className="text-[11px] font-medium text-primary">{getSenderName(repliedMsg.sender_id)}</p>
+                  <p className="text-[11px] text-muted-foreground truncate max-w-[200px]">
+                    {repliedMsg.message_type === 'text' ? repliedMsg.content : `📎 ${repliedMsg.file_name || repliedMsg.message_type}`}
+                  </p>
+                </div>
+              )}
+
               {msg.message_type === 'text' && (
                 <p className="text-sm text-foreground whitespace-pre-wrap break-words overflow-hidden" style={{ maxWidth: `${maxCharsPerLine}ch` }}>{msg.content}</p>
               )}
               {msg.message_type === 'image' && msg.file_url && (
-                <img src={msg.file_url} alt={msg.file_name || 'image'} className="max-w-full rounded-lg" />
+                <div className="relative group">
+                  <img src={msg.file_url} alt={msg.file_name || 'image'} className="max-w-full rounded-lg" />
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'image.jpg'); }}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               )}
               {(msg.message_type === 'video' || msg.message_type === 'video_circle') && msg.file_url && (
-                <video
-                  src={msg.file_url}
-                  controls
-                  className={`max-w-full ${msg.message_type === 'video_circle' ? 'rounded-full w-48 h-48 object-cover' : 'rounded-lg'}`}
-                />
+                <div className="relative group">
+                  <video
+                    src={msg.file_url}
+                    controls
+                    className={`max-w-full ${msg.message_type === 'video_circle' ? 'rounded-full w-48 h-48 object-cover' : 'rounded-lg'}`}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'video.mp4'); }}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               )}
               {msg.message_type === 'voice' && msg.file_url && (
                 <audio src={msg.file_url} controls className="max-w-full" />
               )}
               {msg.message_type === 'file' && msg.file_url && (
-                <a href={msg.file_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary hover:underline">
-                  <FileIcon className="h-4 w-4" />
-                  <span className="text-sm">{msg.file_name || 'Файл'}</span>
-                </a>
+                <div className="flex items-center gap-2">
+                  <a href={msg.file_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary hover:underline flex-1 min-w-0">
+                    <FileIcon className="h-4 w-4 shrink-0" />
+                    <span className="text-sm truncate">{msg.file_name || 'Файл'}</span>
+                  </a>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
+                    onClick={() => downloadFile(msg.file_url!, msg.file_name || 'file')}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               )}
               <div className="flex items-center gap-1 mt-1 justify-end">
                 <p className="text-[10px] text-muted-foreground">
-                  {new Date(msg.created_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}
+                  {formatMessageTime(msg.created_at)}
                 </p>
                 {msg.is_edited && (
                   <span className="text-[10px] text-muted-foreground italic">ред.</span>
@@ -443,6 +570,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="bg-popover border-border">
+          {msg.message_type === 'text' && (
+            <ContextMenuItem onClick={() => startReply(msg)} className="gap-2">
+              <Reply className="h-4 w-4" /> Ответить
+            </ContextMenuItem>
+          )}
           {isOwn && msg.message_type === 'text' && (
             <ContextMenuItem onClick={() => startEdit(msg)} className="gap-2">
               <Edit2 className="h-4 w-4" /> Редактировать
@@ -561,6 +693,20 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </div>
       )}
 
+      {/* Reply bar */}
+      {replyTo && !editingMessage && (
+        <div className="flex items-center gap-2 border-b border-border bg-secondary px-4 py-2">
+          <Reply className="h-4 w-4 text-primary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-primary">{getSenderName(replyTo.sender_id)}</p>
+            <p className="text-xs text-muted-foreground truncate">{replyTo.content}</p>
+          </div>
+          <Button variant="ghost" size="icon" onClick={cancelReply} className="h-6 w-6">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
       {/* Messages */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 flex flex-col justify-end" style={{ minHeight: 0 }}>
         <div className="flex-1" />
@@ -603,6 +749,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           </Button>
           <form onSubmit={sendMessage} className="flex flex-1 items-center gap-2">
             <input
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={uploading ? 'Загрузка файла...' : 'Сообщение...'}
