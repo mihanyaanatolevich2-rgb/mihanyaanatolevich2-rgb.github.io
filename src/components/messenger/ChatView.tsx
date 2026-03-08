@@ -223,8 +223,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       }
       if (deleted) setDeletedIds(new Set(deleted.map(d => d.message_id)));
       markRead();
-      setTimeout(() => scrollToBottom(true), 50);
-      setTimeout(() => scrollToBottom(true), 200);
+      setTimeout(() => scrollToBottom(), 50);
+      setTimeout(() => scrollToBottom(), 150);
+      setTimeout(() => scrollToBottom(), 400);
     };
     load();
   }, [conversationId, user]);
