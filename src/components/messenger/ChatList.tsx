@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon } from 'lucide-react';
+import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon, Camera } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
@@ -29,6 +29,7 @@ interface ChatItem {
   participantName: string;
   participantEmail: string;
   participantUserId?: string;
+  participantAvatarUrl?: string | null;
   lastMessage?: string;
   lastMessageAt?: string;
   isGroup?: boolean;
@@ -49,6 +50,9 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const [search, setSearch] = useState('');
   const [renameDialog, setRenameDialog] = useState<{ open: boolean; userId: string; currentName: string }>({ open: false, userId: '', currentName: '' });
   const [nickname, setNickname] = useState('');
+  const [myProfile, setMyProfile] = useState<{ avatar_url: string | null; display_name: string | null; username: string } | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [scale, setScale] = useState(() => {
     const saved = localStorage.getItem('app-scale');
     return saved ? Number(saved) : 100;
@@ -60,6 +64,13 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('app-theme') as 'dark' | 'light') || 'dark';
   });
+
+  // Load my profile
+  useEffect(() => {
+    if (!user) return;
+    supabase.from('profiles').select('avatar_url, display_name, username').eq('user_id', user.id).single()
+      .then(({ data }) => { if (data) setMyProfile(data); });
+  }, [user]);
 
   // Apply scale
   useEffect(() => {
@@ -78,6 +89,26 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     localStorage.setItem('msg-max-chars', String(maxChars));
     window.dispatchEvent(new Event('msg-max-chars-changed'));
   }, [maxChars]);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    setUploadingAvatar(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `${user.id}/avatar.${ext}`;
+      await supabase.storage.from('chat-media').upload(path, file, { upsert: true });
+      const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
+      const avatarUrl = urlData.publicUrl + '?t=' + Date.now();
+      await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('user_id', user.id);
+      setMyProfile(prev => prev ? { ...prev, avatar_url: avatarUrl } : prev);
+      toast.success('Аватар обновлён');
+    } catch {
+      toast.error('Ошибка загрузки аватара');
+    }
+    setUploadingAvatar(false);
+    if (avatarInputRef.current) avatarInputRef.current.value = '';
+  };
 
   const loadChats = useCallback(async () => {
     if (!user) return;
@@ -121,11 +152,11 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
       convPartsMap.set(p.conversation_id, arr);
     }
 
-    const profileMap = new Map<string, { display_name: string | null; username: string }>();
+    const profileMap = new Map<string, { display_name: string | null; username: string; avatar_url: string | null }>();
     if (otherUserIds.size > 0) {
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('user_id, display_name, username')
+        .select('user_id, display_name, username, avatar_url')
         .in('user_id', Array.from(otherUserIds));
       for (const p of (profiles || [])) {
         profileMap.set(p.user_id, p);
@@ -149,6 +180,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
       let name = 'Unknown';
       let email = '';
       let contactUserId = '';
+      let avatarUrl: string | null = null;
 
       if (isGroup) {
         name = conv?.name || 'Группа';
@@ -160,6 +192,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
           const profile = profileMap.get(contactUserId);
           name = customNick || profile?.display_name || profile?.username || 'Unknown';
           email = profile?.username || '';
+          avatarUrl = profile?.avatar_url || null;
         }
       }
 
@@ -175,6 +208,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         participantName: name,
         participantEmail: email,
         participantUserId: contactUserId,
+        participantAvatarUrl: avatarUrl,
         lastMessage,
         lastMessageAt: lastMsg?.created_at,
         isGroup,
@@ -273,6 +307,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 className={`flex w-full items-center gap-3 px-4 py-3 transition-colors hover:bg-sidebar-accent ${selectedChat === chat.id ? 'bg-sidebar-accent' : ''}`}
               >
                 <Avatar className="h-10 w-10 shrink-0">
+                  {chat.participantAvatarUrl && <AvatarImage src={chat.participantAvatarUrl} />}
                   <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
                     {chat.isGroup ? '👥' : chat.participantName.charAt(0).toUpperCase()}
                   </AvatarFallback>
@@ -324,6 +359,30 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         <DialogContent className="bg-card border-border sm:max-w-sm">
           <DialogHeader><DialogTitle className="text-foreground">Настройки</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            {/* Profile section */}
+            <div className="flex items-center gap-3">
+              <div className="relative group">
+                <Avatar className="h-14 w-14">
+                  {myProfile?.avatar_url && <AvatarImage src={myProfile.avatar_url} />}
+                  <AvatarFallback className="gradient-primary text-primary-foreground text-lg font-semibold">
+                    {(myProfile?.display_name || myProfile?.username || '?').charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <button
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={uploadingAvatar}
+                  className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                >
+                  <Camera className="h-5 w-5 text-white" />
+                </button>
+                <input ref={avatarInputRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-foreground truncate">{myProfile?.display_name || myProfile?.username || ''}</p>
+                <p className="text-xs text-muted-foreground truncate">{user?.email || ''}</p>
+              </div>
+            </div>
+
             {/* Theme toggle */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
