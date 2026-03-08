@@ -41,6 +41,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [partnerName, setPartnerName] = useState('');
   const [partnerId, setPartnerId] = useState('');
   const [partnerLastSeen, setPartnerLastSeen] = useState<string | null>(null);
+  const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
   const [isGroup, setIsGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [uploading, setUploading] = useState(false);
