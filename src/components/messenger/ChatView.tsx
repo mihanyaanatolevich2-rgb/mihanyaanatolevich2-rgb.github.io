@@ -80,10 +80,12 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return () => clearInterval(interval);
   }, [user]);
 
-  const scrollToBottom = (instant = false) => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-    }
+  const scrollToBottom = () => {
+    requestAnimationFrame(() => {
+      if (messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      }
+    });
   };
 
   // Mark as read
