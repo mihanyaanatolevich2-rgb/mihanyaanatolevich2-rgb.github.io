@@ -639,6 +639,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </Button>
         <div className="relative">
           <Avatar className="h-9 w-9">
+            {!isGroup && partnerAvatarUrl && <AvatarImage src={partnerAvatarUrl} />}
             <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
               {displayName.charAt(0).toUpperCase()}
             </AvatarFallback>
