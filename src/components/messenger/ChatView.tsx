@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
 import MessageReactions from './MessageReactions';
 import {
@@ -41,6 +41,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [partnerName, setPartnerName] = useState('');
   const [partnerId, setPartnerId] = useState('');
   const [partnerLastSeen, setPartnerLastSeen] = useState<string | null>(null);
+  const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
   const [isGroup, setIsGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -80,10 +81,12 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return () => clearInterval(interval);
   }, [user]);
 
-  const scrollToBottom = (instant = false) => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-    }
+  const scrollToBottom = () => {
+    requestAnimationFrame(() => {
+      if (messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      }
+    });
   };
 
   // Mark as read
@@ -171,11 +174,12 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         setPartnerId(data.user_id);
         const { data: profile } = await supabase
           .from('profiles')
-          .select('display_name, username, last_seen_at')
+          .select('display_name, username, last_seen_at, avatar_url')
           .eq('user_id', data.user_id)
           .single();
         setPartnerName(profile?.display_name || profile?.username || 'Unknown');
         setPartnerLastSeen(profile?.last_seen_at || null);
+        setPartnerAvatarUrl(profile?.avatar_url || null);
         // Also store partner name for reply display
         const names = new Map<string, string>();
         names.set(data.user_id, profile?.display_name || profile?.username || 'Unknown');
@@ -221,8 +225,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       }
       if (deleted) setDeletedIds(new Set(deleted.map(d => d.message_id)));
       markRead();
-      setTimeout(() => scrollToBottom(true), 50);
-      setTimeout(() => scrollToBottom(true), 200);
+      setTimeout(() => scrollToBottom(), 50);
+      setTimeout(() => scrollToBottom(), 150);
+      setTimeout(() => scrollToBottom(), 400);
     };
     load();
   }, [conversationId, user]);
@@ -634,6 +639,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </Button>
         <div className="relative">
           <Avatar className="h-9 w-9">
+            {!isGroup && partnerAvatarUrl && <AvatarImage src={partnerAvatarUrl} />}
             <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
               {displayName.charAt(0).toUpperCase()}
             </AvatarFallback>
@@ -708,8 +714,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       )}
 
       {/* Messages */}
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 flex flex-col justify-end" style={{ minHeight: 0 }}>
-        <div className="flex-1" />
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2" style={{ minHeight: 0 }}>
         {visibleMessages.map(renderMessage)}
         <div ref={messagesEndRef} />
       </div>
