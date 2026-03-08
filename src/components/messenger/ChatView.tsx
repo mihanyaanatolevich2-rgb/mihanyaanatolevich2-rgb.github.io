@@ -174,11 +174,12 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         setPartnerId(data.user_id);
         const { data: profile } = await supabase
           .from('profiles')
-          .select('display_name, username, last_seen_at')
+          .select('display_name, username, last_seen_at, avatar_url')
           .eq('user_id', data.user_id)
           .single();
         setPartnerName(profile?.display_name || profile?.username || 'Unknown');
         setPartnerLastSeen(profile?.last_seen_at || null);
+        setPartnerAvatarUrl(profile?.avatar_url || null);
         // Also store partner name for reply display
         const names = new Map<string, string>();
         names.set(data.user_id, profile?.display_name || profile?.username || 'Unknown');
