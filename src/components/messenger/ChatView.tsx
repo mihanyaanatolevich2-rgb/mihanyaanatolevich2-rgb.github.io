@@ -72,14 +72,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return () => window.removeEventListener('msg-max-chars-changed', handler);
   }, []);
 
-  // Update last_seen periodically
-  useEffect(() => {
-    if (!user) return;
-    const update = () => supabase.rpc('update_last_seen');
-    update();
-    const interval = setInterval(update, 30000);
-    return () => clearInterval(interval);
-  }, [user]);
+  // last_seen heartbeat moved to Index.tsx (app level)
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
