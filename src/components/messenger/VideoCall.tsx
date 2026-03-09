@@ -98,9 +98,17 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     return pc;
   }, [user, isVideo, sendSignal, hangUp]);
 
-  // Caller: create offer
+  // Caller: clean old signals, then create offer
   const startAsCalller = useCallback(async () => {
     try {
+      if (!user) return;
+      // Clean old call signals for this conversation
+      await supabase
+        .from('call_signals')
+        .delete()
+        .eq('conversation_id', conversationId)
+        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`);
+
       const pc = await setupPeerConnection();
       if (!pc) return;
       const offer = await pc.createOffer();
@@ -110,7 +118,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       console.error('Failed to start call:', err);
       onEnd();
     }
-  }, [setupPeerConnection, sendSignal, onEnd]);
+  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId]);
 
   // Callee: setup PC, then check for existing offer in DB
   const startAsCallee = useCallback(async () => {
