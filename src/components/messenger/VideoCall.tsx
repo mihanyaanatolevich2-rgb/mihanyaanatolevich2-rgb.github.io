@@ -112,16 +112,51 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     }
   }, [setupPeerConnection, sendSignal, onEnd]);
 
-  // Callee: wait for offer, then setup PC and answer
+  // Callee: setup PC, then check for existing offer in DB
   const startAsCallee = useCallback(async () => {
     try {
-      await setupPeerConnection();
-      // PC is ready, will handle offer in signal listener
+      const pc = await setupPeerConnection();
+      if (!pc || !user) return;
+
+      // Fetch existing offer that was sent before we subscribed to realtime
+      const { data: signals } = await supabase
+        .from('call_signals')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .eq('receiver_id', user.id)
+        .eq('signal_type', 'offer')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (signals && signals.length > 0) {
+        const signal = signals[0] as any;
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
+
+        // Also apply any ice candidates that arrived before
+        const { data: iceCandidates } = await supabase
+          .from('call_signals')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .eq('receiver_id', user.id)
+          .eq('signal_type', 'ice-candidate')
+          .gt('created_at', signal.created_at);
+
+        if (iceCandidates) {
+          for (const ic of iceCandidates) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate((ic.signal_data as any).candidate));
+            } catch { /* ignore */ }
+          }
+        }
+      }
     } catch (err) {
       console.error('Failed to setup call:', err);
       onEnd();
     }
-  }, [setupPeerConnection, onEnd]);
+  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal]);
 
   // Listen for signals
   useEffect(() => {

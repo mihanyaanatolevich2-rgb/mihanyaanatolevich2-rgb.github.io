@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
 import Auth from './Auth';
 import ChatList from '@/components/messenger/ChatList';
 import ChatView from '@/components/messenger/ChatView';
@@ -8,6 +9,15 @@ import { MessageSquare } from 'lucide-react';
 const Index = () => {
   const { user, loading } = useAuth();
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
+
+  // Global heartbeat for online status
+  useEffect(() => {
+    if (!user) return;
+    const update = () => supabase.rpc('update_last_seen');
+    update();
+    const interval = setInterval(update, 15000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   if (loading) {
     return (
