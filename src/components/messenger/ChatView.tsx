@@ -30,6 +30,13 @@ interface Message {
   reply_to_id?: string | null;
 }
 
+interface ForwardTarget {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  isGroup: boolean;
+}
+
 interface ChatViewProps {
   conversationId: string;
   onBack: () => void;
