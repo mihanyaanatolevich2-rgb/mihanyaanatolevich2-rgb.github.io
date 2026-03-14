@@ -317,7 +317,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         const signal = payload.new as any;
         if (signal.conversation_id !== conversationId) return;
         if (signal.signal_type === 'offer' && !callType) {
-          setIncomingCall({ type: 'audio' });
+          const incomingType = signal.signal_data?.call_type === 'video' ? 'video' : 'audio';
+          setIncomingCall({ type: incomingType });
         }
       })
       .subscribe();
