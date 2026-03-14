@@ -244,6 +244,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     if (messages.length > 0) loadReadReceipts();
   }, [messages.length]);
 
+  useEffect(() => {
+    if (!forwardDialogOpen) return;
+    loadForwardTargets();
+  }, [forwardDialogOpen, user?.id, conversationId]);
+
   // Realtime messages
   useEffect(() => {
     const channel = supabase
