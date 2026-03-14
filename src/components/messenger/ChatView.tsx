@@ -802,10 +802,22 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </div>
         {!isGroup && (
           <>
-            <Button variant="ghost" size="icon" onClick={() => startCall('audio')} className="text-muted-foreground hover:text-primary">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => startCall('audio')}
+              disabled={!partnerId}
+              className="text-muted-foreground hover:text-primary"
+            >
               <Phone className="h-5 w-5" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => startCall('video')} className="text-muted-foreground hover:text-primary">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => startCall('video')}
+              disabled={!partnerId}
+              className="text-muted-foreground hover:text-primary"
+            >
               <Video className="h-5 w-5" />
             </Button>
           </>
