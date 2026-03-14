@@ -581,6 +581,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
   const displayName = isGroup ? groupName : partnerName;
   const visibleMessages = messages.filter(m => !deletedIds.has(m.id) && !m.deleted_for_all);
+  const filteredForwardTargets = forwardTargets.filter((target) =>
+    target.name.toLowerCase().includes(forwardSearch.trim().toLowerCase()),
+  );
 
   // Get reply message by id
   const getReplyMessage = (replyId: string | null | undefined): Message | undefined => {
