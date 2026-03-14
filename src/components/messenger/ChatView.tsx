@@ -723,6 +723,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   };
 
   const startCall = (type: 'audio' | 'video') => {
+    if (!partnerId || !user) {
+      toast.error('Контакт ещё загружается');
+      return;
+    }
+
     setIsCaller(true);
     setCallType(type);
   };
@@ -734,7 +739,17 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     setIncomingCall(null);
   };
 
-  const rejectCall = () => {
+  const rejectCall = async () => {
+    if (user && partnerId) {
+      await supabase.from('call_signals').insert({
+        conversation_id: conversationId,
+        sender_id: user.id,
+        receiver_id: partnerId,
+        signal_type: 'reject',
+        signal_data: {},
+      } as any);
+    }
+
     setIncomingCall(null);
   };
 
