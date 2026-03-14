@@ -921,6 +921,59 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           </form>
         </div>
       )}
+
+      <Dialog
+        open={forwardDialogOpen}
+        onOpenChange={(open) => {
+          setForwardDialogOpen(open);
+          if (!open) {
+            setForwardMessage(null);
+            setForwardSearch('');
+          }
+        }}
+      >
+        <DialogContent className="bg-card border-border sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-foreground">Переслать сообщение</DialogTitle>
+          </DialogHeader>
+
+          <Input
+            value={forwardSearch}
+            onChange={(e) => setForwardSearch(e.target.value)}
+            placeholder="Поиск чата"
+            className="bg-secondary border-none"
+          />
+
+          <div className="max-h-72 overflow-y-auto space-y-1">
+            {filteredForwardTargets.map((target) => (
+              <button
+                key={target.id}
+                type="button"
+                onClick={() => forwardToConversation(target.id)}
+                disabled={isForwarding}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-secondary disabled:opacity-50"
+              >
+                <Avatar className="h-8 w-8 shrink-0">
+                  {target.avatarUrl && <AvatarImage src={target.avatarUrl} />}
+                  <AvatarFallback className="gradient-primary text-primary-foreground text-xs font-semibold">
+                    {target.isGroup ? '👥' : target.name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{target.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {target.id === conversationId ? 'Текущий чат' : target.isGroup ? 'Группа' : 'Личный чат'}
+                  </p>
+                </div>
+              </button>
+            ))}
+
+            {filteredForwardTargets.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">Чаты не найдены</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
