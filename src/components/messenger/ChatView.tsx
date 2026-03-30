@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import VideoCall from './VideoCall';
 import MessageReactions from './MessageReactions';
 import {
@@ -28,13 +26,6 @@ interface Message {
   is_edited?: boolean;
   deleted_for_all?: boolean;
   reply_to_id?: string | null;
-}
-
-interface ForwardTarget {
-  id: string;
-  name: string;
-  avatarUrl: string | null;
-  isGroup: boolean;
 }
 
 interface ChatViewProps {
@@ -60,11 +51,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editText, setEditText] = useState('');
   const [replyTo, setReplyTo] = useState<Message | null>(null);
-  const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
-  const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
-  const [forwardTargets, setForwardTargets] = useState<ForwardTarget[]>([]);
-  const [forwardSearch, setForwardSearch] = useState('');
-  const [isForwarding, setIsForwarding] = useState(false);
   const [readByMap, setReadByMap] = useState<Map<string, string[]>>(new Map());
   const [participantNames, setParticipantNames] = useState<Map<string, string>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -244,11 +230,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     if (messages.length > 0) loadReadReceipts();
   }, [messages.length]);
 
-  useEffect(() => {
-    if (!forwardDialogOpen) return;
-    loadForwardTargets();
-  }, [forwardDialogOpen, user?.id, conversationId]);
-
   // Realtime messages
   useEffect(() => {
     const channel = supabase
@@ -317,8 +298,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         const signal = payload.new as any;
         if (signal.conversation_id !== conversationId) return;
         if (signal.signal_type === 'offer' && !callType) {
-          const incomingType = signal.signal_data?.call_type === 'video' ? 'video' : 'audio';
-          setIncomingCall({ type: incomingType });
+          setIncomingCall({ type: 'audio' });
         }
       })
       .subscribe();
@@ -379,114 +359,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const loadForwardTargets = async () => {
-    if (!user) return;
-
-    const { data: myParts } = await supabase
-      .from('conversation_participants')
-      .select('conversation_id')
-      .eq('user_id', user.id);
-
-    if (!myParts?.length) {
-      setForwardTargets([]);
-      return;
-    }
-
-    const conversationIds = Array.from(new Set(myParts.map((part) => part.conversation_id)));
-
-    const [{ data: conversations }, { data: allParts }] = await Promise.all([
-      supabase
-        .from('conversations')
-        .select('id, name, is_group')
-        .in('id', conversationIds),
-      supabase
-        .from('conversation_participants')
-        .select('conversation_id, user_id')
-        .in('conversation_id', conversationIds),
-    ]);
-
-    const directPartnerIds = Array.from(
-      new Set((allParts || []).filter((part) => part.user_id !== user.id).map((part) => part.user_id)),
-    );
-
-    const profileMap = new Map<string, { display_name: string | null; username: string; avatar_url: string | null }>();
-
-    if (directPartnerIds.length > 0) {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('user_id, display_name, username, avatar_url')
-        .in('user_id', directPartnerIds);
-
-      for (const profile of profiles || []) {
-        profileMap.set(profile.user_id, profile);
-      }
-    }
-
-    const targets: ForwardTarget[] = (conversations || []).map((conversation) => {
-      if (conversation.is_group) {
-        return {
-          id: conversation.id,
-          name: conversation.name || 'Группа',
-          avatarUrl: null,
-          isGroup: true,
-        };
-      }
-
-      const partnerIdInConversation = (allParts || []).find(
-        (part) => part.conversation_id === conversation.id && part.user_id !== user.id,
-      )?.user_id;
-
-      const profile = partnerIdInConversation ? profileMap.get(partnerIdInConversation) : null;
-
-      return {
-        id: conversation.id,
-        name: profile?.display_name || profile?.username || 'Неизвестный контакт',
-        avatarUrl: profile?.avatar_url || null,
-        isGroup: false,
-      };
-    });
-
-    setForwardTargets(
-      targets.sort((a, b) => {
-        if (a.id === conversationId) return -1;
-        if (b.id === conversationId) return 1;
-        return a.name.localeCompare(b.name, 'ru');
-      }),
-    );
-  };
-
-  const openForwardDialog = (msg: Message) => {
-    setForwardMessage(msg);
-    setForwardSearch('');
-    setForwardDialogOpen(true);
-  };
-
-  const forwardToConversation = async (targetConversationId: string) => {
-    if (!user || !forwardMessage || isForwarding) return;
-
-    setIsForwarding(true);
-
-    try {
-      await supabase.from('messages').insert({
-        conversation_id: targetConversationId,
-        sender_id: user.id,
-        message_type: forwardMessage.message_type,
-        content: forwardMessage.message_type === 'text' ? forwardMessage.content : null,
-        file_url: forwardMessage.file_url,
-        file_name: forwardMessage.file_name,
-        reply_to_id: null,
-      } as any);
-
-      toast.success('Сообщение переслано');
-      setForwardDialogOpen(false);
-      setForwardMessage(null);
-    } catch {
-      toast.error('Не удалось переслать сообщение');
-    } finally {
-      setIsForwarding(false);
-    }
   };
 
   const startEdit = (msg: Message) => {
@@ -581,9 +453,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
   const displayName = isGroup ? groupName : partnerName;
   const visibleMessages = messages.filter(m => !deletedIds.has(m.id) && !m.deleted_for_all);
-  const filteredForwardTargets = forwardTargets.filter((target) =>
-    target.name.toLowerCase().includes(forwardSearch.trim().toLowerCase()),
-  );
 
   // Get reply message by id
   const getReplyMessage = (replyId: string | null | undefined): Message | undefined => {
@@ -704,9 +573,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
               <Reply className="h-4 w-4" /> Ответить
             </ContextMenuItem>
           )}
-          <ContextMenuItem onClick={() => openForwardDialog(msg)} className="gap-2">
-            <Forward className="h-4 w-4" /> Переслать
-          </ContextMenuItem>
           {isOwn && msg.message_type === 'text' && (
             <ContextMenuItem onClick={() => startEdit(msg)} className="gap-2">
               <Edit2 className="h-4 w-4" /> Редактировать
@@ -729,11 +595,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   };
 
   const startCall = (type: 'audio' | 'video') => {
-    if (!partnerId || !user) {
-      toast.error('Контакт ещё загружается');
-      return;
-    }
-
     setIsCaller(true);
     setCallType(type);
   };
@@ -745,17 +606,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     setIncomingCall(null);
   };
 
-  const rejectCall = async () => {
-    if (user && partnerId) {
-      await supabase.from('call_signals').insert({
-        conversation_id: conversationId,
-        sender_id: user.id,
-        receiver_id: partnerId,
-        signal_type: 'reject',
-        signal_data: {},
-      } as any);
-    }
-
+  const rejectCall = () => {
     setIncomingCall(null);
   };
 
@@ -802,22 +653,10 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </div>
         {!isGroup && (
           <>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => startCall('audio')}
-              disabled={!partnerId}
-              className="text-muted-foreground hover:text-primary"
-            >
+            <Button variant="ghost" size="icon" onClick={() => startCall('audio')} className="text-muted-foreground hover:text-primary">
               <Phone className="h-5 w-5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => startCall('video')}
-              disabled={!partnerId}
-              className="text-muted-foreground hover:text-primary"
-            >
+            <Button variant="ghost" size="icon" onClick={() => startCall('video')} className="text-muted-foreground hover:text-primary">
               <Video className="h-5 w-5" />
             </Button>
           </>
@@ -921,59 +760,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           </form>
         </div>
       )}
-
-      <Dialog
-        open={forwardDialogOpen}
-        onOpenChange={(open) => {
-          setForwardDialogOpen(open);
-          if (!open) {
-            setForwardMessage(null);
-            setForwardSearch('');
-          }
-        }}
-      >
-        <DialogContent className="bg-card border-border sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">Переслать сообщение</DialogTitle>
-          </DialogHeader>
-
-          <Input
-            value={forwardSearch}
-            onChange={(e) => setForwardSearch(e.target.value)}
-            placeholder="Поиск чата"
-            className="bg-secondary border-none"
-          />
-
-          <div className="max-h-72 overflow-y-auto space-y-1">
-            {filteredForwardTargets.map((target) => (
-              <button
-                key={target.id}
-                type="button"
-                onClick={() => forwardToConversation(target.id)}
-                disabled={isForwarding}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-secondary disabled:opacity-50"
-              >
-                <Avatar className="h-8 w-8 shrink-0">
-                  {target.avatarUrl && <AvatarImage src={target.avatarUrl} />}
-                  <AvatarFallback className="gradient-primary text-primary-foreground text-xs font-semibold">
-                    {target.isGroup ? '👥' : target.name.charAt(0).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{target.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {target.id === conversationId ? 'Текущий чат' : target.isGroup ? 'Группа' : 'Личный чат'}
-                  </p>
-                </div>
-              </button>
-            ))}
-
-            {filteredForwardTargets.length === 0 && (
-              <p className="py-6 text-center text-sm text-muted-foreground">Чаты не найдены</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

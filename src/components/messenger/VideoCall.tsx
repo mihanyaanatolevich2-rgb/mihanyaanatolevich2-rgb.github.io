@@ -13,7 +13,7 @@ interface VideoCallProps {
   onEnd: () => void;
 }
 
-const ICE_SERVERS: RTCConfiguration = {
+const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -33,160 +33,34 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const endedRef = useRef(false);
-  const initializedRef = useRef(false);
-  const disconnectTimeoutRef = useRef<number | null>(null);
-  const queuedSignalsRef = useRef<any[]>([]);
-  const processedSignalIdsRef = useRef<Set<string>>(new Set());
-  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
-
-  const clearDisconnectTimeout = useCallback(() => {
-    if (disconnectTimeoutRef.current !== null) {
-      window.clearTimeout(disconnectTimeoutRef.current);
-      disconnectTimeoutRef.current = null;
-    }
-  }, []);
 
   const sendSignal = useCallback(async (type: string, data: object) => {
-    if (!user || !partnerId) return;
-
-    const { error } = await supabase.from('call_signals').insert({
+    if (!user) return;
+    await supabase.from('call_signals').insert({
       conversation_id: conversationId,
       sender_id: user.id,
       receiver_id: partnerId,
       signal_type: type,
       signal_data: data as any,
     });
-
-    if (error) {
-      throw error;
-    }
-  }, [user, partnerId, conversationId]);
+  }, [user, conversationId, partnerId]);
 
   const cleanup = useCallback(() => {
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
-    localStreamRef.current = null;
-
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
     pcRef.current?.close();
     pcRef.current = null;
-
-    pendingIceCandidatesRef.current = [];
-    queuedSignalsRef.current = [];
-    processedSignalIdsRef.current.clear();
   }, []);
 
-  const endCall = useCallback(async (sendHangUpSignal: boolean) => {
+  const hangUp = useCallback(() => {
     if (endedRef.current) return;
     endedRef.current = true;
-
-    clearDisconnectTimeout();
-
-    if (sendHangUpSignal) {
-      try {
-        await sendSignal('hang-up', {});
-      } catch {
-        // ignore network errors when ending call
-      }
-    }
-
+    sendSignal('hang-up', {});
     cleanup();
     setStatus('ended');
     onEnd();
-  }, [clearDisconnectTimeout, sendSignal, cleanup, onEnd]);
+  }, [sendSignal, cleanup, onEnd]);
 
-  const addOrQueueIceCandidate = useCallback(async (pc: RTCPeerConnection, candidateInit: RTCIceCandidateInit | undefined) => {
-    if (!candidateInit) return;
-
-    if (!pc.remoteDescription) {
-      pendingIceCandidatesRef.current.push(candidateInit);
-      return;
-    }
-
-    try {
-      await pc.addIceCandidate(new RTCIceCandidate(candidateInit));
-    } catch {
-      // ignore invalid candidate race conditions
-    }
-  }, []);
-
-  const flushPendingIceCandidates = useCallback(async (pc: RTCPeerConnection) => {
-    if (!pc.remoteDescription || pendingIceCandidatesRef.current.length === 0) return;
-
-    const queued = [...pendingIceCandidatesRef.current];
-    pendingIceCandidatesRef.current = [];
-
-    for (const candidate of queued) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch {
-        // ignore invalid candidate race conditions
-      }
-    }
-  }, []);
-
-  const applyRemoteDescription = useCallback(async (pc: RTCPeerConnection, signalData: any) => {
-    if (!signalData?.sdp || !signalData?.type) return;
-
-    if (pc.currentRemoteDescription?.sdp === signalData.sdp) {
-      await flushPendingIceCandidates(pc);
-      return;
-    }
-
-    await pc.setRemoteDescription(new RTCSessionDescription({
-      type: signalData.type,
-      sdp: signalData.sdp,
-    }));
-
-    await flushPendingIceCandidates(pc);
-  }, [flushPendingIceCandidates]);
-
-  const processSignal = useCallback(async (signal: any, pc: RTCPeerConnection) => {
-    if (!signal?.signal_type) return;
-
-    const signalId = signal.id as string | undefined;
-    if (signalId && processedSignalIdsRef.current.has(signalId)) return;
-    if (signalId) processedSignalIdsRef.current.add(signalId);
-
-    try {
-      if (signal.signal_type === 'offer') {
-        if (isCaller) return;
-
-        await applyRemoteDescription(pc, signal.signal_data);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
-        return;
-      }
-
-      if (signal.signal_type === 'answer') {
-        if (!isCaller) return;
-        await applyRemoteDescription(pc, signal.signal_data);
-        return;
-      }
-
-      if (signal.signal_type === 'ice-candidate') {
-        await addOrQueueIceCandidate(pc, signal.signal_data?.candidate);
-        return;
-      }
-
-      if (signal.signal_type === 'hang-up' || signal.signal_type === 'reject') {
-        await endCall(false);
-      }
-    } catch (error) {
-      console.error('Signal handling error:', error);
-    }
-  }, [isCaller, applyRemoteDescription, sendSignal, addOrQueueIceCandidate, endCall]);
-
-  const drainQueuedSignals = useCallback(async (pc: RTCPeerConnection) => {
-    if (queuedSignalsRef.current.length === 0) return;
-
-    const queued = [...queuedSignalsRef.current];
-    queuedSignalsRef.current = [];
-
-    for (const signal of queued) {
-      await processSignal(signal, pc);
-    }
-  }, [processSignal]);
-
+  // Setup peer connection and local stream
   const setupPeerConnection = useCallback(async () => {
     if (!user) return null;
 
@@ -194,212 +68,206 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       audio: true,
       video: isVideo,
     });
-
     localStreamRef.current = stream;
-
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
-    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
     pcRef.current = pc;
 
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        void sendSignal('ice-candidate', { candidate: event.candidate.toJSON() });
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        sendSignal('ice-candidate', { candidate: e.candidate.toJSON() });
       }
     };
 
-    pc.ontrack = (event) => {
-      if (remoteVideoRef.current && event.streams[0]) {
-        remoteVideoRef.current.srcObject = event.streams[0];
+    pc.ontrack = (e) => {
+      if (remoteVideoRef.current && e.streams[0]) {
+        remoteVideoRef.current.srcObject = e.streams[0];
         setStatus('connected');
       }
     };
 
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
-        void endCall(true);
-        return;
-      }
-
-      if (pc.iceConnectionState === 'disconnected') {
-        clearDisconnectTimeout();
-        disconnectTimeoutRef.current = window.setTimeout(() => {
-          if (pc.iceConnectionState === 'disconnected') {
-            void endCall(true);
-          }
-        }, 8000);
-        return;
-      }
-
-      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        clearDisconnectTimeout();
+      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+        hangUp();
       }
     };
 
     return pc;
-  }, [user, isVideo, sendSignal, clearDisconnectTimeout, endCall]);
+  }, [user, isVideo, sendSignal, hangUp]);
 
-  const startAsCaller = useCallback(async () => {
-    if (!user || !partnerId) return;
-
+  // Caller: clean old signals, then create offer
+  const startAsCalller = useCallback(async () => {
     try {
+      if (!user) return;
+      // Clean old call signals for this conversation
       await supabase
         .from('call_signals')
         .delete()
         .eq('conversation_id', conversationId)
-        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id},sender_id.eq.${partnerId},receiver_id.eq.${partnerId}`);
+        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`);
 
       const pc = await setupPeerConnection();
       if (!pc) return;
-
-      await drainQueuedSignals(pc);
-
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-
-      await sendSignal('offer', {
-        sdp: offer.sdp,
-        type: offer.type,
-        call_type: isVideo ? 'video' : 'audio',
-      });
-    } catch (error) {
-      console.error('Failed to start call:', error);
-      await endCall(false);
+      await sendSignal('offer', { sdp: offer.sdp, type: offer.type });
+    } catch (err) {
+      console.error('Failed to start call:', err);
+      onEnd();
     }
-  }, [user, partnerId, conversationId, setupPeerConnection, drainQueuedSignals, sendSignal, isVideo, endCall]);
+  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId]);
 
+  // Callee: setup PC, then check for existing offer in DB
   const startAsCallee = useCallback(async () => {
-    if (!user || !partnerId) return;
-
     try {
       const pc = await setupPeerConnection();
-      if (!pc) return;
+      if (!pc || !user) return;
 
-      await drainQueuedSignals(pc);
-
-      const { data: existingSignals } = await supabase
+      // Fetch existing offer that was sent before we subscribed to realtime
+      const { data: signals } = await supabase
         .from('call_signals')
         .select('*')
         .eq('conversation_id', conversationId)
         .eq('receiver_id', user.id)
-        .eq('sender_id', partnerId)
-        .in('signal_type', ['offer', 'ice-candidate'])
-        .order('created_at', { ascending: true });
+        .eq('signal_type', 'offer')
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-      const latestOffer = [...(existingSignals || [])].reverse().find((signal) => signal.signal_type === 'offer');
+      if (signals && signals.length > 0) {
+        const signal = signals[0] as any;
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
 
-      if (latestOffer) {
-        await processSignal(latestOffer, pc);
+        // Also apply any ice candidates that arrived before
+        const { data: iceCandidates } = await supabase
+          .from('call_signals')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .eq('receiver_id', user.id)
+          .eq('signal_type', 'ice-candidate')
+          .gt('created_at', signal.created_at);
 
-        for (const signal of existingSignals || []) {
-          if (signal.signal_type !== 'ice-candidate') continue;
-          if (signal.created_at < latestOffer.created_at) continue;
-          await processSignal(signal, pc);
+        if (iceCandidates) {
+          for (const ic of iceCandidates) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate((ic.signal_data as any).candidate));
+            } catch { /* ignore */ }
+          }
         }
       }
-    } catch (error) {
-      console.error('Failed to setup call:', error);
-      await endCall(false);
+    } catch (err) {
+      console.error('Failed to setup call:', err);
+      onEnd();
     }
-  }, [user, partnerId, setupPeerConnection, drainQueuedSignals, conversationId, processSignal, endCall]);
+  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal]);
 
+  // Listen for signals
   useEffect(() => {
     if (!user) return;
 
     const channel = supabase
       .channel(`call-${conversationId}-${user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'call_signals',
-          filter: `receiver_id=eq.${user.id}`,
-        },
-        (payload) => {
-          const signal = payload.new as any;
-          if (signal.conversation_id !== conversationId) return;
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'call_signals',
+        filter: `receiver_id=eq.${user.id}`,
+      }, async (payload) => {
+        const signal = payload.new as any;
+        if (signal.conversation_id !== conversationId) return;
 
-          const pc = pcRef.current;
-          if (!pc) {
-            queuedSignalsRef.current.push(signal);
-            return;
+        const pc = pcRef.current;
+        if (!pc) return;
+
+        try {
+          if (signal.signal_type === 'offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
+          } else if (signal.signal_type === 'answer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+          } else if (signal.signal_type === 'ice-candidate') {
+            await pc.addIceCandidate(new RTCIceCandidate(signal.signal_data.candidate));
+          } else if (signal.signal_type === 'hang-up') {
+            if (!endedRef.current) {
+              endedRef.current = true;
+              cleanup();
+              setStatus('ended');
+              onEnd();
+            }
           }
-
-          void processSignal(signal, pc);
-        },
-      )
+        } catch (err) {
+          console.error('Signal handling error:', err);
+        }
+      })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, conversationId, processSignal]);
+    return () => { supabase.removeChannel(channel); };
+  }, [user, conversationId, sendSignal, cleanup, onEnd]);
 
+  // Init call based on role
   useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-
     if (isCaller) {
-      void startAsCaller();
+      startAsCalller();
     } else {
-      void startAsCallee();
+      startAsCallee();
     }
+    return cleanup;
+  }, []);
 
-    return () => {
-      clearDisconnectTimeout();
-      cleanup();
-    };
-  }, [isCaller, startAsCaller, startAsCallee, clearDisconnectTimeout, cleanup]);
-
+  // Call timer
   useEffect(() => {
     if (status !== 'connected') return;
-    const interval = setInterval(() => setCallDuration((duration) => duration + 1), 1000);
+    const interval = setInterval(() => setCallDuration(d => d + 1), 1000);
     return () => clearInterval(interval);
   }, [status]);
 
-  const formatDuration = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60);
-    const sec = seconds % 60;
-    return `${minutes}:${sec.toString().padStart(2, '0')}`;
+  const formatDuration = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
   const toggleMute = () => {
     const audioTrack = localStreamRef.current?.getAudioTracks()[0];
-    if (!audioTrack) return;
-
-    audioTrack.enabled = !audioTrack.enabled;
-    setIsMuted(!audioTrack.enabled);
+    if (audioTrack) {
+      audioTrack.enabled = !audioTrack.enabled;
+      setIsMuted(!audioTrack.enabled);
+    }
   };
 
   const toggleVideo = () => {
     const videoTrack = localStreamRef.current?.getVideoTracks()[0];
-    if (!videoTrack) return;
-
-    videoTrack.enabled = !videoTrack.enabled;
-    setIsVideoOff(!videoTrack.enabled);
+    if (videoTrack) {
+      videoTrack.enabled = !videoTrack.enabled;
+      setIsVideoOff(!videoTrack.enabled);
+    }
   };
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-center bg-background">
+    <div className="flex h-full flex-col items-center justify-center bg-background relative">
       <video ref={remoteVideoRef} autoPlay playsInline className="absolute inset-0 h-full w-full object-cover" />
 
       {status === 'connecting' && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80">
-          <div className="gradient-primary mb-4 flex h-20 w-20 items-center justify-center rounded-full shadow-glow">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80 z-10">
+          <div className="h-20 w-20 rounded-full gradient-primary flex items-center justify-center mb-4 shadow-glow">
             <span className="text-3xl font-bold text-primary-foreground">{partnerName.charAt(0).toUpperCase()}</span>
           </div>
           <p className="text-lg font-semibold text-foreground">{partnerName}</p>
-          <p className="mt-1 animate-pulse text-sm text-muted-foreground">{isCaller ? 'Вызов...' : 'Подключение...'}</p>
+          <p className="text-sm text-muted-foreground animate-pulse mt-1">
+            {isCaller ? 'Вызов...' : 'Подключение...'}
+          </p>
         </div>
       )}
 
       {status === 'connected' && (
-        <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-secondary/80 px-3 py-1">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-secondary/80 px-3 py-1 rounded-full">
           <span className="text-xs text-foreground">{formatDuration(callDuration)}</span>
         </div>
       )}
@@ -409,7 +277,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         autoPlay
         muted
         playsInline
-        className="absolute bottom-24 right-4 z-20 h-32 w-24 rounded-xl border-2 border-border object-cover"
+        className="absolute bottom-24 right-4 h-32 w-24 rounded-xl object-cover border-2 border-border z-20"
       />
 
       <div className="absolute bottom-6 z-20 flex gap-4">
@@ -421,16 +289,14 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         >
           {isMuted ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
         </Button>
-
         <Button
-          onClick={() => void endCall(true)}
+          onClick={hangUp}
           variant="ghost"
           size="icon"
           className="h-14 w-14 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/80"
         >
           <PhoneOff className="h-6 w-6" />
         </Button>
-
         {isVideo && (
           <Button
             onClick={toggleVideo}
