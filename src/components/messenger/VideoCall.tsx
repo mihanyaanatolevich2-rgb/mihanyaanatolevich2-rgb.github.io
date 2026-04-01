@@ -13,11 +13,21 @@ interface VideoCallProps {
   onEnd: () => void;
 }
 
-const ICE_SERVERS = {
+const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
+    // Free TURN servers for cross-network connectivity
+    {
+      urls: 'turn:freeturn.net:3478',
+      username: 'free',
+      credential: 'free',
+    },
+    {
+      urls: 'turns:freeturn.net:5349',
+      username: 'free',
+      credential: 'free',
+    },
   ],
 };
 
@@ -60,7 +70,6 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     onEnd();
   }, [sendSignal, cleanup, onEnd]);
 
-  // Setup peer connection and local stream
   const setupPeerConnection = useCallback(async () => {
     if (!user) return null;
 
@@ -98,11 +107,9 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     return pc;
   }, [user, isVideo, sendSignal, hangUp]);
 
-  // Caller: clean old signals, then create offer
-  const startAsCalller = useCallback(async () => {
+  const startAsCaller = useCallback(async () => {
     try {
       if (!user) return;
-      // Clean old call signals for this conversation
       await supabase
         .from('call_signals')
         .delete()
@@ -120,13 +127,11 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     }
   }, [setupPeerConnection, sendSignal, onEnd, user, conversationId]);
 
-  // Callee: setup PC, then check for existing offer in DB
   const startAsCallee = useCallback(async () => {
     try {
       const pc = await setupPeerConnection();
       if (!pc || !user) return;
 
-      // Fetch existing offer that was sent before we subscribed to realtime
       const { data: signals } = await supabase
         .from('call_signals')
         .select('*')
@@ -143,7 +148,6 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         await pc.setLocalDescription(answer);
         await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
 
-        // Also apply any ice candidates that arrived before
         const { data: iceCandidates } = await supabase
           .from('call_signals')
           .select('*')
@@ -211,17 +215,15 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     return () => { supabase.removeChannel(channel); };
   }, [user, conversationId, sendSignal, cleanup, onEnd]);
 
-  // Init call based on role
   useEffect(() => {
     if (isCaller) {
-      startAsCalller();
+      startAsCaller();
     } else {
       startAsCallee();
     }
     return cleanup;
   }, []);
 
-  // Call timer
   useEffect(() => {
     if (status !== 'connected') return;
     const interval = setInterval(() => setCallDuration(d => d + 1), 1000);

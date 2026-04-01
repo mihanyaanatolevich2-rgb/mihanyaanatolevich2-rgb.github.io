@@ -13,6 +13,10 @@ import {
   ContextMenuTrigger,
   ContextMenuSeparator,
 } from '@/components/ui/context-menu';
+import {
+  Dialog,
+  DialogContent,
+} from '@/components/ui/dialog';
 import { toast } from 'sonner';
 
 interface Message {
@@ -53,6 +57,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [readByMap, setReadByMap] = useState<Map<string, string[]>>(new Map());
   const [participantNames, setParticipantNames] = useState<Map<string, string>>(new Map());
+  const [participantAvatars, setParticipantAvatars] = useState<Map<string, string | null>>(new Map());
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,8 +77,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     window.addEventListener('msg-max-chars-changed', handler);
     return () => window.removeEventListener('msg-max-chars-changed', handler);
   }, []);
-
-  // last_seen heartbeat moved to Index.tsx (app level)
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -133,7 +137,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       if (conv?.is_group) {
         setIsGroup(true);
         setGroupName(conv.name || 'Группа');
-        // Load participant names for group
         const { data: parts } = await supabase
           .from('conversation_participants')
           .select('user_id')
@@ -142,14 +145,17 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           const ids = parts.map(p => p.user_id);
           const { data: profiles } = await supabase
             .from('profiles')
-            .select('user_id, display_name, username')
+            .select('user_id, display_name, username, avatar_url')
             .in('user_id', ids);
           if (profiles) {
             const names = new Map<string, string>();
+            const avatars = new Map<string, string | null>();
             for (const p of profiles) {
               names.set(p.user_id, p.display_name || p.username || 'Unknown');
+              avatars.set(p.user_id, p.avatar_url);
             }
             setParticipantNames(names);
+            setParticipantAvatars(avatars);
           }
         }
         return;
@@ -173,27 +179,33 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         setPartnerName(profile?.display_name || profile?.username || 'Unknown');
         setPartnerLastSeen(profile?.last_seen_at || null);
         setPartnerAvatarUrl(profile?.avatar_url || null);
-        // Also store partner name for reply display
         const names = new Map<string, string>();
+        const avatars = new Map<string, string | null>();
         names.set(data.user_id, profile?.display_name || profile?.username || 'Unknown');
+        avatars.set(data.user_id, profile?.avatar_url || null);
         if (user) names.set(user.id, 'Вы');
         setParticipantNames(names);
+        setParticipantAvatars(avatars);
       }
     };
     loadConvInfo();
   }, [conversationId, user]);
 
-  // Poll partner last_seen
+  // Realtime partner last_seen via profiles channel
   useEffect(() => {
     if (!partnerId || isGroup) return;
-    const interval = setInterval(async () => {
+    // Initial fetch
+    const fetchLastSeen = async () => {
       const { data } = await supabase
         .from('profiles')
         .select('last_seen_at')
         .eq('user_id', partnerId)
         .single();
       if (data) setPartnerLastSeen(data.last_seen_at);
-    }, 15000);
+    };
+    fetchLastSeen();
+    // Poll every 10s for accurate last_seen
+    const interval = setInterval(fetchLastSeen, 10000);
     return () => clearInterval(interval);
   }, [partnerId, isGroup]);
 
@@ -427,6 +439,20 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return `${hours}:${minutes}`;
   };
 
+  // Format date for separator
+  const formatDateSeparator = (isoString: string) => {
+    const date = new Date(isoString);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const isYesterday = date.toDateString() === yesterday.toDateString();
+
+    if (isToday) return 'Сегодня';
+    if (isYesterday) return 'Вчера';
+    return date.toLocaleDateString('ru', { day: 'numeric', month: 'long', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+  };
+
   // Format last seen
   const formatLastSeen = (lastSeen: string | null) => {
     if (!lastSeen) return '';
@@ -474,123 +500,151 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     }
   };
 
-  const renderMessage = (msg: Message) => {
+  // Check if we need a date separator before this message
+  const needsDateSeparator = (index: number): boolean => {
+    if (index === 0) return true;
+    const prev = visibleMessages[index - 1];
+    const curr = visibleMessages[index];
+    return new Date(prev.created_at).toDateString() !== new Date(curr.created_at).toDateString();
+  };
+
+  const renderMessage = (msg: Message, index: number) => {
     const isOwn = msg.sender_id === user?.id;
     const readers = readByMap.get(msg.id) || [];
     const isRead = isOwn && readers.length > 0;
     const repliedMsg = getReplyMessage(msg.reply_to_id);
+    const showDateSep = needsDateSeparator(index);
 
     return (
-      <ContextMenu key={msg.id}>
-        <ContextMenuTrigger>
-          <div id={`msg-${msg.id}`} className={`flex animate-fade-in transition-colors duration-500 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${isOwn ? 'message-own rounded-br-md' : 'message-other rounded-bl-md'}`}>
-              {/* Reply preview */}
-              {repliedMsg && (
-                <div
-                  className="mb-1.5 border-l-2 border-primary pl-2 py-1 cursor-pointer rounded-r bg-primary/5"
-                  onClick={() => scrollToMessage(repliedMsg.id)}
-                >
-                  <p className="text-[11px] font-medium text-primary">{getSenderName(repliedMsg.sender_id)}</p>
-                  <p className="text-[11px] text-muted-foreground truncate max-w-[200px]">
-                    {repliedMsg.message_type === 'text' ? repliedMsg.content : `📎 ${repliedMsg.file_name || repliedMsg.message_type}`}
-                  </p>
-                </div>
-              )}
-
-              {msg.message_type === 'text' && (
-                <p className="text-sm text-foreground whitespace-pre-wrap break-words overflow-hidden" style={{ maxWidth: `${maxCharsPerLine}ch` }}>{msg.content}</p>
-              )}
-              {msg.message_type === 'image' && msg.file_url && (
-                <div className="relative group">
-                  <img src={msg.file_url} alt={msg.file_name || 'image'} className="max-w-full rounded-lg" />
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'image.jpg'); }}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              )}
-              {(msg.message_type === 'video' || msg.message_type === 'video_circle') && msg.file_url && (
-                <div className="relative group">
-                  <video
-                    src={msg.file_url}
-                    controls
-                    className={`max-w-full ${msg.message_type === 'video_circle' ? 'rounded-full w-48 h-48 object-cover' : 'rounded-lg'}`}
-                  />
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'video.mp4'); }}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              )}
-              {msg.message_type === 'voice' && msg.file_url && (
-                <audio src={msg.file_url} controls className="max-w-full" />
-              )}
-              {msg.message_type === 'file' && msg.file_url && (
-                <div className="flex items-center gap-2">
-                  <a href={msg.file_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary hover:underline flex-1 min-w-0">
-                    <FileIcon className="h-4 w-4 shrink-0" />
-                    <span className="text-sm truncate">{msg.file_name || 'Файл'}</span>
-                  </a>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
-                    onClick={() => downloadFile(msg.file_url!, msg.file_name || 'file')}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              )}
-              <div className="flex items-center gap-1 mt-1 justify-end">
-                <p className="text-[10px] text-muted-foreground">
-                  {formatMessageTime(msg.created_at)}
-                </p>
-                {msg.is_edited && (
-                  <span className="text-[10px] text-muted-foreground italic">ред.</span>
-                )}
-                {isOwn && (
-                  isRead 
-                    ? <CheckCheck className="h-3.5 w-3.5 text-primary" />
-                    : <Check className="h-3.5 w-3.5 text-muted-foreground" />
-                )}
-              </div>
-              <MessageReactions messageId={msg.id} />
-            </div>
+      <div key={msg.id}>
+        {/* Date separator */}
+        {showDateSep && (
+          <div className="flex justify-center my-3">
+            <span className="text-[11px] text-muted-foreground bg-secondary/80 px-3 py-1 rounded-full">
+              {formatDateSeparator(msg.created_at)}
+            </span>
           </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="bg-popover border-border">
-          {msg.message_type === 'text' && (
+        )}
+        <ContextMenu>
+          <ContextMenuTrigger>
+            <div id={`msg-${msg.id}`} className={`flex animate-fade-in transition-colors duration-500 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${isOwn ? 'message-own rounded-br-md' : 'message-other rounded-bl-md'}`}>
+                {/* Sender name in group */}
+                {isGroup && !isOwn && (
+                  <p className="text-[11px] font-semibold mb-0.5" style={{ color: `hsl(${(msg.sender_id.charCodeAt(0) * 37) % 360}, 60%, 60%)` }}>
+                    {getSenderName(msg.sender_id)}
+                  </p>
+                )}
+                {/* Reply preview */}
+                {repliedMsg && (
+                  <div
+                    className="mb-1.5 border-l-2 border-primary pl-2 py-1 cursor-pointer rounded-r bg-primary/5"
+                    onClick={() => scrollToMessage(repliedMsg.id)}
+                  >
+                    <p className="text-[11px] font-medium text-primary">{getSenderName(repliedMsg.sender_id)}</p>
+                    <p className="text-[11px] text-muted-foreground truncate max-w-[200px]">
+                      {repliedMsg.message_type === 'text' ? repliedMsg.content : `📎 ${repliedMsg.file_name || repliedMsg.message_type}`}
+                    </p>
+                  </div>
+                )}
+
+                {msg.message_type === 'text' && (
+                  <p className="text-sm text-foreground whitespace-pre-wrap break-words overflow-hidden" style={{ maxWidth: `${maxCharsPerLine}ch` }}>{msg.content}</p>
+                )}
+                {msg.message_type === 'image' && msg.file_url && (
+                  <div className="relative group">
+                    <img
+                      src={msg.file_url}
+                      alt={msg.file_name || 'image'}
+                      className="max-w-full rounded-lg cursor-pointer"
+                      onClick={() => setZoomImage(msg.file_url)}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'image.jpg'); }}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+                {(msg.message_type === 'video' || msg.message_type === 'video_circle') && msg.file_url && (
+                  <div className="relative group">
+                    <video
+                      src={msg.file_url}
+                      controls
+                      className={`max-w-full ${msg.message_type === 'video_circle' ? 'rounded-full w-48 h-48 object-cover' : 'rounded-lg'}`}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'video.mp4'); }}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+                {msg.message_type === 'voice' && msg.file_url && (
+                  <audio src={msg.file_url} controls className="max-w-full" />
+                )}
+                {msg.message_type === 'file' && msg.file_url && (
+                  <div className="flex items-center gap-2">
+                    <a href={msg.file_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary hover:underline flex-1 min-w-0">
+                      <FileIcon className="h-4 w-4 shrink-0" />
+                      <span className="text-sm truncate">{msg.file_name || 'Файл'}</span>
+                    </a>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
+                      onClick={() => downloadFile(msg.file_url!, msg.file_name || 'file')}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+                <div className="flex items-center gap-1 mt-1 justify-end">
+                  <p className="text-[10px] text-muted-foreground">
+                    {formatMessageTime(msg.created_at)}
+                  </p>
+                  {msg.is_edited && (
+                    <span className="text-[10px] text-muted-foreground italic">ред.</span>
+                  )}
+                  {isOwn && (
+                    isRead 
+                      ? <CheckCheck className="h-3.5 w-3.5 text-primary" />
+                      : <Check className="h-3.5 w-3.5 text-muted-foreground" />
+                  )}
+                </div>
+                <MessageReactions messageId={msg.id} />
+              </div>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="bg-popover border-border">
             <ContextMenuItem onClick={() => startReply(msg)} className="gap-2">
               <Reply className="h-4 w-4" /> Ответить
             </ContextMenuItem>
-          )}
-          {isOwn && msg.message_type === 'text' && (
-            <ContextMenuItem onClick={() => startEdit(msg)} className="gap-2">
-              <Edit2 className="h-4 w-4" /> Редактировать
-            </ContextMenuItem>
-          )}
-          <ContextMenuItem onClick={() => deleteForMe(msg.id)} className="gap-2">
-            <TrashIcon className="h-4 w-4" /> Удалить для себя
-          </ContextMenuItem>
-          {isOwn && (
-            <>
-              <ContextMenuSeparator />
-              <ContextMenuItem onClick={() => deleteForAll(msg.id)} className="gap-2 text-destructive">
-                <Trash2 className="h-4 w-4" /> Удалить для всех
+            {isOwn && msg.message_type === 'text' && (
+              <ContextMenuItem onClick={() => startEdit(msg)} className="gap-2">
+                <Edit2 className="h-4 w-4" /> Редактировать
               </ContextMenuItem>
-            </>
-          )}
-        </ContextMenuContent>
-      </ContextMenu>
+            )}
+            <ContextMenuItem onClick={() => deleteForMe(msg.id)} className="gap-2">
+              <TrashIcon className="h-4 w-4" /> Удалить для себя
+            </ContextMenuItem>
+            {isOwn && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem onClick={() => deleteForAll(msg.id)} className="gap-2 text-destructive">
+                  <Trash2 className="h-4 w-4" /> Удалить для всех
+                </ContextMenuItem>
+              </>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
+      </div>
     );
   };
 
@@ -631,7 +685,13 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div className="relative">
-          <Avatar className="h-9 w-9">
+          <Avatar
+            className="h-9 w-9 cursor-pointer"
+            onClick={() => {
+              const url = isGroup ? null : partnerAvatarUrl;
+              if (url) setZoomImage(url);
+            }}
+          >
             {!isGroup && partnerAvatarUrl && <AvatarImage src={partnerAvatarUrl} />}
             <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
               {displayName.charAt(0).toUpperCase()}
@@ -708,7 +768,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
       {/* Messages */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2" style={{ minHeight: 0 }}>
-        {visibleMessages.map(renderMessage)}
+        {visibleMessages.map((msg, i) => renderMessage(msg, i))}
         <div ref={messagesEndRef} />
       </div>
 
@@ -760,6 +820,15 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           </form>
         </div>
       )}
+
+      {/* Image zoom dialog */}
+      <Dialog open={!!zoomImage} onOpenChange={(o) => !o && setZoomImage(null)}>
+        <DialogContent className="bg-transparent border-none shadow-none max-w-[90vw] max-h-[90vh] p-0 flex items-center justify-center">
+          {zoomImage && (
+            <img src={zoomImage} alt="zoom" className="max-w-full max-h-[85vh] rounded-lg object-contain" onClick={() => setZoomImage(null)} />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

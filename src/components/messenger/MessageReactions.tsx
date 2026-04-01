@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { SmilePlus } from 'lucide-react';
@@ -20,7 +20,7 @@ const MessageReactions = ({ messageId }: MessageReactionsProps) => {
   const [reactions, setReactions] = useState<Reaction[]>([]);
   const [showPicker, setShowPicker] = useState(false);
 
-  const loadReactions = async () => {
+  const loadReactions = useCallback(async () => {
     const { data } = await supabase
       .from('message_reactions')
       .select('emoji, user_id')
@@ -39,11 +39,11 @@ const MessageReactions = ({ messageId }: MessageReactionsProps) => {
     setReactions(
       Array.from(map.entries()).map(([emoji, v]) => ({ emoji, ...v }))
     );
-  };
+  }, [messageId, user?.id]);
 
   useEffect(() => {
     loadReactions();
-  }, [messageId]);
+  }, [loadReactions]);
 
   useEffect(() => {
     const channel = supabase
@@ -57,7 +57,7 @@ const MessageReactions = ({ messageId }: MessageReactionsProps) => {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [messageId]);
+  }, [messageId, loadReactions]);
 
   const toggleReaction = async (emoji: string) => {
     if (!user) return;
@@ -65,6 +65,10 @@ const MessageReactions = ({ messageId }: MessageReactionsProps) => {
 
     const existing = reactions.find(r => r.emoji === emoji && r.mine);
     if (existing) {
+      // Optimistic update: remove
+      setReactions(prev => prev.map(r => 
+        r.emoji === emoji ? { ...r, count: r.count - 1, mine: false } : r
+      ).filter(r => r.count > 0));
       await supabase
         .from('message_reactions')
         .delete()
@@ -72,6 +76,14 @@ const MessageReactions = ({ messageId }: MessageReactionsProps) => {
         .eq('user_id', user.id)
         .eq('emoji', emoji);
     } else {
+      // Optimistic update: add
+      setReactions(prev => {
+        const exists = prev.find(r => r.emoji === emoji);
+        if (exists) {
+          return prev.map(r => r.emoji === emoji ? { ...r, count: r.count + 1, mine: true } : r);
+        }
+        return [...prev, { emoji, count: 1, mine: true }];
+      });
       await supabase
         .from('message_reactions')
         .insert({ message_id: messageId, user_id: user.id, emoji });
