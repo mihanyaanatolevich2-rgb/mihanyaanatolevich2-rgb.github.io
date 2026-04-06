@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
@@ -405,6 +405,17 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     toast.success('Сообщение удалено для всех');
   };
 
+  const forwardMessage = async (msg: Message) => {
+    if (msg.content) {
+      try {
+        await navigator.clipboard.writeText(msg.content);
+        toast.success('Сообщение скопировано — вставьте в нужный чат');
+      } catch {
+        toast.error('Не удалось скопировать');
+      }
+    }
+  };
+
   const startReply = (msg: Message) => {
     setReplyTo(msg);
     setEditingMessage(null);
@@ -629,6 +640,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             {isOwn && msg.message_type === 'text' && (
               <ContextMenuItem onClick={() => startEdit(msg)} className="gap-2">
                 <Edit2 className="h-4 w-4" /> Редактировать
+            </ContextMenuItem>
+            )}
+            {msg.content && (
+              <ContextMenuItem onClick={() => forwardMessage(msg)} className="gap-2">
+                <Forward className="h-4 w-4" /> Переслать
               </ContextMenuItem>
             )}
             <ContextMenuItem onClick={() => deleteForMe(msg.id)} className="gap-2">

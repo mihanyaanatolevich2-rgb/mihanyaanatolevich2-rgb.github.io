@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { usePushSubscription } from '@/hooks/usePushSubscription';
 import { supabase } from '@/integrations/supabase/client';
 import Auth from './Auth';
 import ChatList from '@/components/messenger/ChatList';
@@ -9,6 +10,7 @@ import { MessageSquare } from 'lucide-react';
 const Index = () => {
   const { user, loading } = useAuth();
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
+  usePushSubscription();
 
   // Global heartbeat for online status
   useEffect(() => {
