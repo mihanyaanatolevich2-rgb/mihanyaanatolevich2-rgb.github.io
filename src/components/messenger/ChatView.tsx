@@ -405,6 +405,17 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     toast.success('Сообщение удалено для всех');
   };
 
+  const forwardMessage = async (msg: Message) => {
+    if (msg.content) {
+      try {
+        await navigator.clipboard.writeText(msg.content);
+        toast.success('Сообщение скопировано — вставьте в нужный чат');
+      } catch {
+        toast.error('Не удалось скопировать');
+      }
+    }
+  };
+
   const startReply = (msg: Message) => {
     setReplyTo(msg);
     setEditingMessage(null);
