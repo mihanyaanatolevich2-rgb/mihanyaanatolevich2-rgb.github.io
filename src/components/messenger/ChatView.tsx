@@ -629,6 +629,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             {isOwn && msg.message_type === 'text' && (
               <ContextMenuItem onClick={() => startEdit(msg)} className="gap-2">
                 <Edit2 className="h-4 w-4" /> Редактировать
+            </ContextMenuItem>
+            )}
+            {msg.content && (
+              <ContextMenuItem onClick={() => forwardMessage(msg)} className="gap-2">
+                <Forward className="h-4 w-4" /> Переслать
               </ContextMenuItem>
             )}
             <ContextMenuItem onClick={() => deleteForMe(msg.id)} className="gap-2">

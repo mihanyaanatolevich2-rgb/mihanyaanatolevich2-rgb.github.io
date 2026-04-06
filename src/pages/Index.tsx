@@ -10,6 +10,7 @@ import { MessageSquare } from 'lucide-react';
 const Index = () => {
   const { user, loading } = useAuth();
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
+  usePushSubscription();
 
   // Global heartbeat for online status
   useEffect(() => {
