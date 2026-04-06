@@ -703,12 +703,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </div>
         <div className="flex-1">
           <p className="text-sm font-semibold text-foreground">{displayName}</p>
-          {isGroup ? (
+          {isGroup && (
             <p className="text-xs text-muted-foreground">Группа</p>
-          ) : (
-            <p className={`text-xs ${isOnline ? 'text-[hsl(var(--online))]' : 'text-muted-foreground'}`}>
-              {formatLastSeen(partnerLastSeen)}
-            </p>
           )}
         </div>
         {!isGroup && (
