@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
@@ -640,6 +640,13 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             <ContextMenuItem onClick={() => startReply(msg)} className="gap-2">
               <Reply className="h-4 w-4" /> Ответить
             </ContextMenuItem>
+            {msg.message_type === 'text' && msg.content && (
+              <ContextMenuItem onClick={async () => {
+                try { await navigator.clipboard.writeText(msg.content!); toast.success('Скопировано'); } catch { toast.error('Ошибка'); }
+              }} className="gap-2">
+                <Copy className="h-4 w-4" /> Копировать
+              </ContextMenuItem>
+            )}
             {isOwn && msg.message_type === 'text' && (
               <ContextMenuItem onClick={() => startEdit(msg)} className="gap-2">
                 <Edit2 className="h-4 w-4" /> Редактировать
