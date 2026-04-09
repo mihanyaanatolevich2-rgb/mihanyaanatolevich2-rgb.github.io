@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy, Pin, PinOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
@@ -32,10 +32,26 @@ interface Message {
   reply_to_id?: string | null;
 }
 
+interface PinnedMessage {
+  id: string;
+  message_id: string;
+  conversation_id: string;
+  pinned_by: string;
+}
+
 interface ChatViewProps {
   conversationId: string;
   onBack: () => void;
 }
+
+const BUILTIN_WALLPAPERS = [
+  { id: 'none', css: '', size: '' },
+  { id: 'dots', css: 'radial-gradient(circle, hsl(var(--muted-foreground) / 0.08) 1px, transparent 1px)', size: '20px 20px' },
+  { id: 'grid', css: 'linear-gradient(hsl(var(--muted-foreground) / 0.05) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--muted-foreground) / 0.05) 1px, transparent 1px)', size: '24px 24px' },
+  { id: 'diagonal', css: 'repeating-linear-gradient(45deg, transparent, transparent 10px, hsl(var(--muted-foreground) / 0.03) 10px, hsl(var(--muted-foreground) / 0.03) 11px)', size: 'auto' },
+  { id: 'bubbles', css: 'radial-gradient(circle at 20% 80%, hsl(var(--primary) / 0.04) 0%, transparent 50%), radial-gradient(circle at 80% 20%, hsl(var(--primary) / 0.06) 0%, transparent 50%), radial-gradient(circle at 50% 50%, hsl(var(--primary) / 0.02) 0%, transparent 70%)', size: 'auto' },
+  { id: 'waves', css: 'repeating-linear-gradient(135deg, transparent, transparent 20px, hsl(var(--primary) / 0.03) 20px, hsl(var(--primary) / 0.03) 40px)', size: 'auto' },
+];
 
 const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const { user } = useAuth();
@@ -59,6 +75,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [participantNames, setParticipantNames] = useState<Map<string, string>>(new Map());
   const [participantAvatars, setParticipantAvatars] = useState<Map<string, string | null>>(new Map());
   const [zoomImage, setZoomImage] = useState<string | null>(null);
+  const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
+  const [wallpaperStyle, setWallpaperStyle] = useState<React.CSSProperties>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +94,28 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     };
     window.addEventListener('msg-max-chars-changed', handler);
     return () => window.removeEventListener('msg-max-chars-changed', handler);
+  }, []);
+
+  // Wallpaper
+  const updateWallpaper = () => {
+    const wpId = localStorage.getItem('app-wallpaper') || 'none';
+    const customWp = localStorage.getItem('app-wallpaper-custom') || '';
+    if (wpId === 'custom' && customWp) {
+      setWallpaperStyle({ backgroundImage: `url(${customWp})`, backgroundSize: 'cover', backgroundPosition: 'center' });
+    } else {
+      const wp = BUILTIN_WALLPAPERS.find(w => w.id === wpId);
+      if (wp && wp.css) {
+        setWallpaperStyle({ background: `${wp.css}`, backgroundSize: wp.size || 'auto' });
+      } else {
+        setWallpaperStyle({});
+      }
+    }
+  };
+
+  useEffect(() => {
+    updateWallpaper();
+    window.addEventListener('wallpaper-changed', updateWallpaper);
+    return () => window.removeEventListener('wallpaper-changed', updateWallpaper);
   }, []);
 
   const scrollToBottom = () => {
@@ -121,6 +161,15 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       }
       setReadByMap(map);
     }
+  };
+
+  // Load pinned messages
+  const loadPinnedMessages = async () => {
+    const { data } = await supabase
+      .from('pinned_messages')
+      .select('*')
+      .eq('conversation_id', conversationId);
+    if (data) setPinnedMessages(data as PinnedMessage[]);
   };
 
   // Load conversation info
@@ -189,12 +238,12 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       }
     };
     loadConvInfo();
+    loadPinnedMessages();
   }, [conversationId, user]);
 
-  // Realtime partner last_seen via profiles channel
+  // Realtime partner last_seen
   useEffect(() => {
     if (!partnerId || isGroup) return;
-    // Initial fetch
     const fetchLastSeen = async () => {
       const { data } = await supabase
         .from('profiles')
@@ -204,7 +253,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       if (data) setPartnerLastSeen(data.last_seen_at);
     };
     fetchLastSeen();
-    // Poll every 10s for accurate last_seen
     const interval = setInterval(fetchLastSeen, 10000);
     return () => clearInterval(interval);
   }, [partnerId, isGroup]);
@@ -295,6 +343,22 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return () => { supabase.removeChannel(channel); };
   }, [conversationId, user, messages.length]);
 
+  // Realtime pinned messages
+  useEffect(() => {
+    const channel = supabase
+      .channel(`pins-${conversationId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'pinned_messages',
+        filter: `conversation_id=eq.${conversationId}`,
+      }, () => {
+        loadPinnedMessages();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [conversationId]);
+
   // Listen for incoming calls
   useEffect(() => {
     if (!user || isGroup) return;
@@ -310,7 +374,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         const signal = payload.new as any;
         if (signal.conversation_id !== conversationId) return;
         if (signal.signal_type === 'offer' && !callType) {
-          setIncomingCall({ type: 'audio' });
+          const isVideoCall = signal.signal_data?.isVideo || false;
+          setIncomingCall({ type: isVideoCall ? 'video' : 'audio' });
         }
       })
       .subscribe();
@@ -407,16 +472,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
   const forwardMessage = async (msg: Message) => {
     const textToCopy = msg.content || msg.file_url || '';
-    if (!textToCopy) {
-      toast.error('Нечего копировать');
-      return;
-    }
+    if (!textToCopy) { toast.error('Нечего копировать'); return; }
     try {
       await navigator.clipboard.writeText(textToCopy);
       toast.success(msg.file_url ? 'Ссылка на файл скопирована — вставьте в нужный чат' : 'Сообщение скопировано — вставьте в нужный чат');
-    } catch {
-      toast.error('Не удалось скопировать');
-    }
+    } catch { toast.error('Не удалось скопировать'); }
   };
 
   const startReply = (msg: Message) => {
@@ -425,9 +485,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
-  const cancelReply = () => {
-    setReplyTo(null);
-  };
+  const cancelReply = () => { setReplyTo(null); };
 
   const downloadFile = async (url: string, filename: string) => {
     try {
@@ -440,20 +498,35 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(link.href);
-    } catch {
-      toast.error('Ошибка при скачивании');
-    }
+    } catch { toast.error('Ошибка при скачивании'); }
   };
 
-  // Format time from ISO string properly
+  const pinMessage = async (msgId: string) => {
+    if (!user) return;
+    await supabase.from('pinned_messages').insert({
+      conversation_id: conversationId,
+      message_id: msgId,
+      pinned_by: user.id,
+    } as any);
+    toast.success('Сообщение закреплено');
+    loadPinnedMessages();
+  };
+
+  const unpinMessage = async (msgId: string) => {
+    await supabase.from('pinned_messages').delete()
+      .eq('conversation_id', conversationId)
+      .eq('message_id', msgId);
+    toast.success('Сообщение откреплено');
+    loadPinnedMessages();
+  };
+
+  const isPinned = (msgId: string) => pinnedMessages.some(p => p.message_id === msgId);
+
   const formatMessageTime = (isoString: string) => {
     const date = new Date(isoString);
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    return `${hours}:${minutes}`;
+    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
   };
 
-  // Format date for separator
   const formatDateSeparator = (isoString: string) => {
     const date = new Date(isoString);
     const now = new Date();
@@ -461,32 +534,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     const isYesterday = date.toDateString() === yesterday.toDateString();
-
     if (isToday) return 'Сегодня';
     if (isYesterday) return 'Вчера';
     return date.toLocaleDateString('ru', { day: 'numeric', month: 'long', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
-  };
-
-  // Format last seen
-  const formatLastSeen = (lastSeen: string | null) => {
-    if (!lastSeen) return '';
-    const date = new Date(lastSeen);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-
-    if (diffMin < 2) return 'в сети';
-    
-    const timeStr = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-    
-    const isToday = date.toDateString() === now.toDateString();
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const isYesterday = date.toDateString() === yesterday.toDateString();
-
-    if (isToday) return `был(а) в ${timeStr}`;
-    if (isYesterday) return `был(а) вчера в ${timeStr}`;
-    return `был(а) ${date.toLocaleDateString('ru', { day: 'numeric', month: 'short' })} в ${timeStr}`;
   };
 
   const isOnline = partnerLastSeen ? (new Date().getTime() - new Date(partnerLastSeen).getTime()) < 120000 : false;
@@ -494,7 +544,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const displayName = isGroup ? groupName : partnerName;
   const visibleMessages = messages.filter(m => !deletedIds.has(m.id) && !m.deleted_for_all);
 
-  // Get reply message by id
   const getReplyMessage = (replyId: string | null | undefined): Message | undefined => {
     if (!replyId) return undefined;
     return messages.find(m => m.id === replyId);
@@ -514,7 +563,6 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     }
   };
 
-  // Check if we need a date separator before this message
   const needsDateSeparator = (index: number): boolean => {
     if (index === 0) return true;
     const prev = visibleMessages[index - 1];
@@ -522,16 +570,21 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return new Date(prev.created_at).toDateString() !== new Date(curr.created_at).toDateString();
   };
 
+  // Get latest pinned message to show banner
+  const latestPinned = pinnedMessages.length > 0
+    ? messages.find(m => m.id === pinnedMessages[pinnedMessages.length - 1]?.message_id)
+    : null;
+
   const renderMessage = (msg: Message, index: number) => {
     const isOwn = msg.sender_id === user?.id;
     const readers = readByMap.get(msg.id) || [];
     const isRead = isOwn && readers.length > 0;
     const repliedMsg = getReplyMessage(msg.reply_to_id);
     const showDateSep = needsDateSeparator(index);
+    const pinned = isPinned(msg.id);
 
     return (
       <div key={msg.id}>
-        {/* Date separator */}
         {showDateSep && (
           <div className="flex justify-center my-3">
             <span className="text-[11px] text-muted-foreground bg-secondary/80 px-3 py-1 rounded-full">
@@ -541,15 +594,19 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         )}
         <ContextMenu>
           <ContextMenuTrigger>
-            <div id={`msg-${msg.id}`} className={`flex animate-fade-in transition-colors duration-500 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${isOwn ? 'message-own rounded-br-md' : 'message-other rounded-bl-md'}`}>
-                {/* Sender name in group */}
+            <div
+              id={`msg-${msg.id}`}
+              className={`flex transition-all duration-300 msg-animate ${isOwn ? 'justify-end' : 'justify-start'}`}
+            >
+              <div className={`max-w-[75%] rounded-2xl px-4 py-2 relative ${isOwn ? 'message-own rounded-br-md' : 'message-other rounded-bl-md'} ${pinned ? 'ring-1 ring-primary/30' : ''}`}>
+                {pinned && (
+                  <Pin className="absolute -top-1.5 -right-1.5 h-3.5 w-3.5 text-primary" />
+                )}
                 {isGroup && !isOwn && (
                   <p className="text-[11px] font-semibold mb-0.5" style={{ color: `hsl(${(msg.sender_id.charCodeAt(0) * 37) % 360}, 60%, 60%)` }}>
                     {getSenderName(msg.sender_id)}
                   </p>
                 )}
-                {/* Reply preview */}
                 {repliedMsg && (
                   <div
                     className="mb-1.5 border-l-2 border-primary pl-2 py-1 cursor-pointer rounded-r bg-primary/5"
@@ -561,41 +618,21 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
                     </p>
                   </div>
                 )}
-
                 {msg.message_type === 'text' && (
                   <p className="text-sm text-foreground whitespace-pre-wrap break-words overflow-hidden" style={{ maxWidth: `${maxCharsPerLine}ch` }}>{msg.content}</p>
                 )}
                 {msg.message_type === 'image' && msg.file_url && (
                   <div className="relative group">
-                    <img
-                      src={msg.file_url}
-                      alt={msg.file_name || 'image'}
-                      className="max-w-full rounded-lg cursor-pointer"
-                      onClick={() => setZoomImage(msg.file_url)}
-                    />
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'image.jpg'); }}
-                    >
+                    <img src={msg.file_url} alt={msg.file_name || 'image'} className="max-w-full rounded-lg cursor-pointer" onClick={() => setZoomImage(msg.file_url)} />
+                    <Button variant="secondary" size="icon" className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'image.jpg'); }}>
                       <Download className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 )}
                 {(msg.message_type === 'video' || msg.message_type === 'video_circle') && msg.file_url && (
                   <div className="relative group">
-                    <video
-                      src={msg.file_url}
-                      controls
-                      className={`max-w-full ${msg.message_type === 'video_circle' ? 'rounded-full w-48 h-48 object-cover' : 'rounded-lg'}`}
-                    />
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'video.mp4'); }}
-                    >
+                    <video src={msg.file_url} controls className={`max-w-full ${msg.message_type === 'video_circle' ? 'rounded-full w-48 h-48 object-cover' : 'rounded-lg'}`} />
+                    <Button variant="secondary" size="icon" className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'video.mp4'); }}>
                       <Download className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -609,28 +646,15 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
                       <FileIcon className="h-4 w-4 shrink-0" />
                       <span className="text-sm truncate">{msg.file_name || 'Файл'}</span>
                     </a>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary"
-                      onClick={() => downloadFile(msg.file_url!, msg.file_name || 'file')}
-                    >
+                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-muted-foreground hover:text-primary" onClick={() => downloadFile(msg.file_url!, msg.file_name || 'file')}>
                       <Download className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 )}
                 <div className="flex items-center gap-1 mt-1 justify-end">
-                  <p className="text-[10px] text-muted-foreground">
-                    {formatMessageTime(msg.created_at)}
-                  </p>
-                  {msg.is_edited && (
-                    <span className="text-[10px] text-muted-foreground italic">ред.</span>
-                  )}
-                  {isOwn && (
-                    isRead 
-                      ? <CheckCheck className="h-3.5 w-3.5 text-primary" />
-                      : <Check className="h-3.5 w-3.5 text-muted-foreground" />
-                  )}
+                  <p className="text-[10px] text-muted-foreground">{formatMessageTime(msg.created_at)}</p>
+                  {msg.is_edited && <span className="text-[10px] text-muted-foreground italic">ред.</span>}
+                  {isOwn && (isRead ? <CheckCheck className="h-3.5 w-3.5 text-primary" /> : <Check className="h-3.5 w-3.5 text-muted-foreground" />)}
                 </div>
                 <MessageReactions messageId={msg.id} />
               </div>
@@ -650,13 +674,24 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             {isOwn && msg.message_type === 'text' && (
               <ContextMenuItem onClick={() => startEdit(msg)} className="gap-2">
                 <Edit2 className="h-4 w-4" /> Редактировать
-            </ContextMenuItem>
+              </ContextMenuItem>
             )}
             {(msg.content || msg.file_url) && (
               <ContextMenuItem onClick={() => forwardMessage(msg)} className="gap-2">
                 <Forward className="h-4 w-4" /> Переслать
               </ContextMenuItem>
             )}
+            <ContextMenuSeparator />
+            {isPinned(msg.id) ? (
+              <ContextMenuItem onClick={() => unpinMessage(msg.id)} className="gap-2">
+                <PinOff className="h-4 w-4" /> Открепить
+              </ContextMenuItem>
+            ) : (
+              <ContextMenuItem onClick={() => pinMessage(msg.id)} className="gap-2">
+                <Pin className="h-4 w-4" /> Закрепить
+              </ContextMenuItem>
+            )}
+            <ContextMenuSeparator />
             <ContextMenuItem onClick={() => deleteForMe(msg.id)} className="gap-2">
               <TrashIcon className="h-4 w-4" /> Удалить для себя
             </ContextMenuItem>
@@ -704,7 +739,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full flex-col bg-background chat-slide-in">
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-3">
         <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden text-muted-foreground">
@@ -729,9 +764,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </div>
         <div className="flex-1">
           <p className="text-sm font-semibold text-foreground">{displayName}</p>
-          {isGroup && (
-            <p className="text-xs text-muted-foreground">Группа</p>
-          )}
+          {isGroup && <p className="text-xs text-muted-foreground">Группа</p>}
         </div>
         {!isGroup && (
           <>
@@ -753,13 +786,28 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             <span className="text-sm font-medium text-foreground">{partnerName} звонит...</span>
           </div>
           <div className="flex gap-2">
-            <Button size="sm" onClick={acceptCall} className="gradient-primary text-primary-foreground rounded-full px-4">
-              Ответить
-            </Button>
-            <Button size="sm" variant="destructive" onClick={rejectCall} className="rounded-full px-4">
-              Отклонить
-            </Button>
+            <Button size="sm" onClick={acceptCall} className="gradient-primary text-primary-foreground rounded-full px-4">Ответить</Button>
+            <Button size="sm" variant="destructive" onClick={rejectCall} className="rounded-full px-4">Отклонить</Button>
           </div>
+        </div>
+      )}
+
+      {/* Pinned message banner */}
+      {latestPinned && (
+        <div
+          className="flex items-center gap-2 border-b border-border bg-secondary/50 px-4 py-2 cursor-pointer hover:bg-secondary/80 transition-colors"
+          onClick={() => scrollToMessage(latestPinned.id)}
+        >
+          <Pin className="h-4 w-4 text-primary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-medium text-primary">Закреплённое сообщение</p>
+            <p className="text-xs text-muted-foreground truncate">
+              {latestPinned.message_type === 'text' ? latestPinned.content : `📎 ${latestPinned.file_name || latestPinned.message_type}`}
+            </p>
+          </div>
+          {pinnedMessages.length > 1 && (
+            <span className="text-[10px] text-muted-foreground shrink-0">{pinnedMessages.length} закр.</span>
+          )}
         </div>
       )}
 
@@ -789,7 +837,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       )}
 
       {/* Messages */}
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2" style={{ minHeight: 0 }}>
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-2"
+        style={{ minHeight: 0, ...wallpaperStyle }}
+      >
         {visibleMessages.map((msg, i) => renderMessage(msg, i))}
         <div ref={messagesEndRef} />
       </div>
@@ -810,21 +862,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </div>
       ) : (
         <div className="flex items-center gap-2 border-t border-border px-4 py-3">
-          <input
-            ref={fileInputRef}
-            type="file"
-            onChange={handleFileUpload}
-            className="hidden"
-            accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="text-muted-foreground hover:text-primary shrink-0"
-          >
+          <input ref={fileInputRef} type="file" onChange={handleFileUpload} className="hidden" accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip" />
+          <Button type="button" variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="text-muted-foreground hover:text-primary shrink-0">
             <Paperclip className="h-5 w-5" />
           </Button>
           <form onSubmit={sendMessage} className="flex flex-1 items-center gap-2">

@@ -142,4 +142,36 @@
   .font-mono {
     font-family: 'JetBrains Mono', monospace;
   }
+
+  /* Smooth chat slide-in animation */
+  .chat-slide-in {
+    animation: chatSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes chatSlideIn {
+    from {
+      opacity: 0;
+      transform: translateX(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  /* Message appear animation */
+  .msg-animate {
+    animation: msgAppear 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes msgAppear {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
 }
