@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon, Camera } from 'lucide-react';
+import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon, Camera, Palette } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -41,6 +41,25 @@ interface ChatListProps {
   onSelectChat: (id: string) => void;
 }
 
+const ACCENT_COLORS = [
+  { name: 'Бирюзовый', hue: 175, primary: '175 70% 50%' },
+  { name: 'Синий', hue: 220, primary: '220 70% 55%' },
+  { name: 'Фиолетовый', hue: 270, primary: '270 60% 55%' },
+  { name: 'Зелёный', hue: 142, primary: '142 60% 45%' },
+  { name: 'Оранжевый', hue: 25, primary: '25 90% 55%' },
+  { name: 'Розовый', hue: 330, primary: '330 70% 55%' },
+  { name: 'Красный', hue: 0, primary: '0 70% 55%' },
+];
+
+const BUILTIN_WALLPAPERS = [
+  { id: 'none', name: 'Нет', css: '' },
+  { id: 'dots', name: 'Точки', css: 'radial-gradient(circle, hsl(var(--muted-foreground) / 0.08) 1px, transparent 1px)' , size: '20px 20px' },
+  { id: 'grid', name: 'Сетка', css: 'linear-gradient(hsl(var(--muted-foreground) / 0.05) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--muted-foreground) / 0.05) 1px, transparent 1px)', size: '24px 24px' },
+  { id: 'diagonal', name: 'Диагональ', css: 'repeating-linear-gradient(45deg, transparent, transparent 10px, hsl(var(--muted-foreground) / 0.03) 10px, hsl(var(--muted-foreground) / 0.03) 11px)', size: 'auto' },
+  { id: 'bubbles', name: 'Пузырьки', css: 'radial-gradient(circle at 20% 80%, hsl(var(--primary) / 0.04) 0%, transparent 50%), radial-gradient(circle at 80% 20%, hsl(var(--primary) / 0.06) 0%, transparent 50%), radial-gradient(circle at 50% 50%, hsl(var(--primary) / 0.02) 0%, transparent 70%)', size: 'auto' },
+  { id: 'waves', name: 'Волны', css: 'repeating-linear-gradient(135deg, transparent, transparent 20px, hsl(var(--primary) / 0.03) 20px, hsl(var(--primary) / 0.03) 40px)', size: 'auto' },
+];
+
 const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const { user, signOut } = useAuth();
   const [chats, setChats] = useState<ChatItem[]>([]);
@@ -53,6 +72,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const [myProfile, setMyProfile] = useState<{ avatar_url: string | null; display_name: string | null; username: string } | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const wallpaperInputRef = useRef<HTMLInputElement>(null);
   const [scale, setScale] = useState(() => {
     const saved = localStorage.getItem('app-scale');
     return saved ? Number(saved) : 100;
@@ -63,6 +83,16 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   });
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('app-theme') as 'dark' | 'light') || 'dark';
+  });
+  const [accentIndex, setAccentIndex] = useState(() => {
+    const saved = localStorage.getItem('app-accent-index');
+    return saved ? Number(saved) : 0;
+  });
+  const [wallpaperId, setWallpaperId] = useState(() => {
+    return localStorage.getItem('app-wallpaper') || 'none';
+  });
+  const [customWallpaper, setCustomWallpaper] = useState(() => {
+    return localStorage.getItem('app-wallpaper-custom') || '';
   });
 
   // Load my profile
@@ -83,6 +113,34 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('app-theme', theme);
   }, [theme]);
+
+  // Apply accent color
+  useEffect(() => {
+    const accent = ACCENT_COLORS[accentIndex] || ACCENT_COLORS[0];
+    document.documentElement.style.setProperty('--primary', accent.primary);
+    document.documentElement.style.setProperty('--ring', accent.primary);
+    // Update message-own color based on accent
+    const lightTheme = theme === 'light';
+    if (lightTheme) {
+      document.documentElement.style.setProperty('--message-own', `${accent.hue} 50% 88%`);
+      document.documentElement.style.setProperty('--primary-foreground', '0 0% 100%');
+    } else {
+      document.documentElement.style.setProperty('--message-own', `${accent.hue} 60% 18%`);
+      document.documentElement.style.setProperty('--primary-foreground', '220 20% 8%');
+    }
+    localStorage.setItem('app-accent-index', String(accentIndex));
+  }, [accentIndex, theme]);
+
+  // Apply wallpaper
+  useEffect(() => {
+    localStorage.setItem('app-wallpaper', wallpaperId);
+    window.dispatchEvent(new Event('wallpaper-changed'));
+  }, [wallpaperId]);
+
+  useEffect(() => {
+    localStorage.setItem('app-wallpaper-custom', customWallpaper);
+    window.dispatchEvent(new Event('wallpaper-changed'));
+  }, [customWallpaper]);
 
   // Save max chars
   useEffect(() => {
@@ -108,6 +166,18 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     }
     setUploadingAvatar(false);
     if (avatarInputRef.current) avatarInputRef.current.value = '';
+  };
+
+  const handleWallpaperUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCustomWallpaper(reader.result as string);
+      setWallpaperId('custom');
+    };
+    reader.readAsDataURL(file);
+    if (wallpaperInputRef.current) wallpaperInputRef.current.value = '';
   };
 
   const loadChats = useCallback(async () => {
@@ -263,6 +333,19 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     setNickname('');
   };
 
+  const resetSettings = () => {
+    setScale(100);
+    setMaxChars(40);
+    setTheme('dark');
+    setAccentIndex(0);
+    setWallpaperId('none');
+    setCustomWallpaper('');
+    document.documentElement.style.removeProperty('--primary');
+    document.documentElement.style.removeProperty('--ring');
+    document.documentElement.style.removeProperty('--message-own');
+    document.documentElement.style.removeProperty('--primary-foreground');
+  };
+
   const filteredChats = chats.filter(c =>
     c.participantName.toLowerCase().includes(search.toLowerCase()) ||
     c.participantEmail.toLowerCase().includes(search.toLowerCase())
@@ -283,9 +366,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
           <Button variant="ghost" size="icon" onClick={() => setShowNewChat(true)} className="text-muted-foreground hover:text-primary">
             <Plus className="h-5 w-5" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={signOut} className="text-muted-foreground hover:text-destructive">
-            <LogOut className="h-5 w-5" />
-          </Button>
         </div>
       </div>
 
@@ -304,7 +384,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
             <ContextMenuTrigger>
               <button
                 onClick={() => handleSelectChat(chat.id)}
-                className={`flex w-full items-center gap-3 px-4 py-3 transition-colors hover:bg-sidebar-accent ${selectedChat === chat.id ? 'bg-sidebar-accent' : ''}`}
+                className={`flex w-full items-center gap-3 px-4 py-3 transition-all duration-200 hover:bg-sidebar-accent ${selectedChat === chat.id ? 'bg-sidebar-accent' : ''}`}
               >
                 <Avatar className="h-10 w-10 shrink-0">
                   {chat.participantAvatarUrl && <AvatarImage src={chat.participantAvatarUrl} />}
@@ -356,9 +436,9 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
 
       {/* Settings dialog */}
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="bg-card border-border sm:max-w-sm">
+        <DialogContent className="bg-card border-border sm:max-w-sm max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="text-foreground">Настройки</DialogTitle></DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-5">
             {/* Profile section */}
             <div className="flex items-center gap-3">
               <div className="relative group">
@@ -392,8 +472,53 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
               <Switch checked={theme === 'light'} onCheckedChange={(checked) => setTheme(checked ? 'light' : 'dark')} />
             </div>
 
+            {/* Accent color */}
             <div>
-              <label className="text-sm font-medium text-foreground mb-2 block">Масштаб интерфейса: {scale}%</label>
+              <div className="flex items-center gap-2 mb-2">
+                <Palette className="h-4 w-4 text-muted-foreground" />
+                <label className="text-sm font-medium text-foreground">Акцент чата</label>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {ACCENT_COLORS.map((color, i) => (
+                  <button
+                    key={color.name}
+                    onClick={() => setAccentIndex(i)}
+                    className={`h-8 w-8 rounded-full transition-all duration-200 border-2 ${accentIndex === i ? 'border-foreground scale-110' : 'border-transparent'}`}
+                    style={{ backgroundColor: `hsl(${color.primary})` }}
+                    title={color.name}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Wallpaper */}
+            <div>
+              <label className="text-sm font-medium text-foreground mb-2 block">Обои чата</label>
+              <div className="grid grid-cols-3 gap-2">
+                {BUILTIN_WALLPAPERS.map(wp => (
+                  <button
+                    key={wp.id}
+                    onClick={() => { setWallpaperId(wp.id); if (wp.id !== 'custom') setCustomWallpaper(''); }}
+                    className={`h-16 rounded-lg border-2 transition-all duration-200 text-[10px] text-muted-foreground flex items-end justify-center pb-1 ${wallpaperId === wp.id ? 'border-primary' : 'border-border'}`}
+                    style={wp.css ? { background: `${wp.css}, hsl(var(--background))`, backgroundSize: wp.size } : { background: 'hsl(var(--background))' }}
+                  >
+                    {wp.name}
+                  </button>
+                ))}
+                <button
+                  onClick={() => wallpaperInputRef.current?.click()}
+                  className={`h-16 rounded-lg border-2 transition-all duration-200 text-[10px] text-muted-foreground flex items-center justify-center ${wallpaperId === 'custom' ? 'border-primary' : 'border-border'}`}
+                  style={customWallpaper ? { backgroundImage: `url(${customWallpaper})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'hsl(var(--secondary))' }}
+                >
+                  {customWallpaper ? '' : '+ Своё фото'}
+                </button>
+              </div>
+              <input ref={wallpaperInputRef} type="file" accept="image/*" onChange={handleWallpaperUpload} className="hidden" />
+            </div>
+
+            {/* Scale */}
+            <div>
+              <label className="text-sm font-medium text-foreground mb-2 block">Масштаб: {scale}%</label>
               <div className="flex items-center gap-3">
                 <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setScale(s => Math.max(70, s - 5))}>
                   <ZoomOut className="h-4 w-4" />
@@ -404,6 +529,8 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 </Button>
               </div>
             </div>
+
+            {/* Max chars */}
             <div>
               <label className="text-sm font-medium text-foreground mb-2 block">Символов в строке: {maxChars}</label>
               <div className="flex items-center gap-3">
@@ -415,9 +542,14 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                   <ZoomIn className="h-4 w-4" />
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Ограничивает ширину текста сообщений (для длинных ссылок)</p>
+              <p className="text-xs text-muted-foreground mt-1">Ограничивает ширину текста сообщений</p>
             </div>
-            <Button variant="outline" onClick={() => { setScale(100); setMaxChars(40); setTheme('dark'); }} className="w-full">Сбросить всё</Button>
+
+            {/* Reset + Logout */}
+            <Button variant="outline" onClick={resetSettings} className="w-full">Сбросить настройки</Button>
+            <Button variant="destructive" onClick={signOut} className="w-full gap-2">
+              <LogOut className="h-4 w-4" /> Выйти из аккаунта
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
