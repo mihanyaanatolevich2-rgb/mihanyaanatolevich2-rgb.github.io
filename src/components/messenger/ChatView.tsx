@@ -408,13 +408,32 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     const replyId = replyTo?.id || null;
     setReplyTo(null);
 
-    await supabase.from('messages').insert({
+    // Optimistic: show message instantly
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg: Message = {
+      id: tempId,
+      sender_id: user.id,
+      content,
+      message_type: 'text',
+      file_url: null,
+      file_name: null,
+      created_at: new Date().toISOString(),
+      reply_to_id: replyId,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
+    const { data } = await supabase.from('messages').insert({
       conversation_id: conversationId,
       sender_id: user.id,
       content,
       message_type: 'text',
       reply_to_id: replyId,
-    } as any);
+    } as any).select().single();
+
+    // Replace temp message with real one (realtime may also fire, dedup below)
+    if (data) {
+      setMessages(prev => prev.map(m => m.id === tempId ? (data as Message) : m));
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
