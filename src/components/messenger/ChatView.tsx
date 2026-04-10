@@ -45,12 +45,12 @@ interface ChatViewProps {
 }
 
 const BUILTIN_WALLPAPERS = [
-  { id: 'none', css: '', size: '' },
-  { id: 'dots', css: 'radial-gradient(circle, hsl(var(--muted-foreground) / 0.08) 1px, transparent 1px)', size: '20px 20px' },
-  { id: 'grid', css: 'linear-gradient(hsl(var(--muted-foreground) / 0.05) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--muted-foreground) / 0.05) 1px, transparent 1px)', size: '24px 24px' },
-  { id: 'diagonal', css: 'repeating-linear-gradient(45deg, transparent, transparent 10px, hsl(var(--muted-foreground) / 0.03) 10px, hsl(var(--muted-foreground) / 0.03) 11px)', size: 'auto' },
-  { id: 'bubbles', css: 'radial-gradient(circle at 20% 80%, hsl(var(--primary) / 0.04) 0%, transparent 50%), radial-gradient(circle at 80% 20%, hsl(var(--primary) / 0.06) 0%, transparent 50%), radial-gradient(circle at 50% 50%, hsl(var(--primary) / 0.02) 0%, transparent 70%)', size: 'auto' },
-  { id: 'waves', css: 'repeating-linear-gradient(135deg, transparent, transparent 20px, hsl(var(--primary) / 0.03) 20px, hsl(var(--primary) / 0.03) 40px)', size: 'auto' },
+  { id: 'none', css: (_c: string) => '', size: '' },
+  { id: 'dots', css: (c: string) => `radial-gradient(circle, hsl(${c || 'var(--muted-foreground)'} / 0.12) 1px, transparent 1px)`, size: '20px 20px' },
+  { id: 'grid', css: (c: string) => `linear-gradient(hsl(${c || 'var(--muted-foreground)'} / 0.08) 1px, transparent 1px), linear-gradient(90deg, hsl(${c || 'var(--muted-foreground)'} / 0.08) 1px, transparent 1px)`, size: '24px 24px' },
+  { id: 'diagonal', css: (c: string) => `repeating-linear-gradient(45deg, transparent, transparent 10px, hsl(${c || 'var(--muted-foreground)'} / 0.06) 10px, hsl(${c || 'var(--muted-foreground)'} / 0.06) 11px)`, size: 'auto' },
+  { id: 'bubbles', css: (c: string) => `radial-gradient(circle at 20% 80%, hsl(${c || 'var(--primary)'} / 0.08) 0%, transparent 50%), radial-gradient(circle at 80% 20%, hsl(${c || 'var(--primary)'} / 0.1) 0%, transparent 50%), radial-gradient(circle at 50% 50%, hsl(${c || 'var(--primary)'} / 0.04) 0%, transparent 70%)`, size: 'auto' },
+  { id: 'waves', css: (c: string) => `repeating-linear-gradient(135deg, transparent, transparent 20px, hsl(${c || 'var(--primary)'} / 0.06) 20px, hsl(${c || 'var(--primary)'} / 0.06) 40px)`, size: 'auto' },
 ];
 
 const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
@@ -105,12 +105,18 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const updateWallpaper = () => {
     const wpId = localStorage.getItem('app-wallpaper') || 'none';
     const customWp = localStorage.getItem('app-wallpaper-custom') || '';
+    const wpColor = localStorage.getItem('app-wallpaper-color') || '';
     if (wpId === 'custom' && customWp) {
       setWallpaperStyle({ backgroundImage: `url(${customWp})`, backgroundSize: 'cover', backgroundPosition: 'center' });
     } else {
       const wp = BUILTIN_WALLPAPERS.find(w => w.id === wpId);
-      if (wp && wp.css) {
-        setWallpaperStyle({ background: `${wp.css}`, backgroundSize: wp.size || 'auto' });
+      if (wp) {
+        const cssVal = wp.css(wpColor);
+        if (cssVal) {
+          setWallpaperStyle({ background: `${cssVal}`, backgroundSize: wp.size || 'auto' });
+        } else {
+          setWallpaperStyle({});
+        }
       } else {
         setWallpaperStyle({});
       }
