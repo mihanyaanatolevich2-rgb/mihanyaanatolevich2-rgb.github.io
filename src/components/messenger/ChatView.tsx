@@ -312,7 +312,18 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
         const newMsg = payload.new as Message;
-        setMessages(prev => [...prev, newMsg]);
+        setMessages(prev => {
+          // Deduplicate: if already present (from optimistic insert), replace temp
+          if (prev.some(m => m.id === newMsg.id)) return prev;
+          // Also replace any temp message with matching content/time
+          const tempIdx = prev.findIndex(m => m.id.startsWith('temp-') && m.content === newMsg.content && m.sender_id === newMsg.sender_id);
+          if (tempIdx >= 0) {
+            const copy = [...prev];
+            copy[tempIdx] = newMsg;
+            return copy;
+          }
+          return [...prev, newMsg];
+        });
         if (newMsg.sender_id !== user?.id) {
           markMessagesRead([newMsg]);
         }
@@ -408,13 +419,32 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     const replyId = replyTo?.id || null;
     setReplyTo(null);
 
-    await supabase.from('messages').insert({
+    // Optimistic: show message instantly
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg: Message = {
+      id: tempId,
+      sender_id: user.id,
+      content,
+      message_type: 'text',
+      file_url: null,
+      file_name: null,
+      created_at: new Date().toISOString(),
+      reply_to_id: replyId,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
+    const { data } = await supabase.from('messages').insert({
       conversation_id: conversationId,
       sender_id: user.id,
       content,
       message_type: 'text',
       reply_to_id: replyId,
-    } as any);
+    } as any).select().single();
+
+    // Replace temp message with real one (realtime may also fire, dedup below)
+    if (data) {
+      setMessages(prev => prev.map(m => m.id === tempId ? (data as Message) : m));
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
