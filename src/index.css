@@ -145,7 +145,11 @@
 
   /* Smooth chat slide-in animation */
   .chat-slide-in {
-    animation: chatSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: chatSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  .chat-slide-out {
+    animation: chatSlideOut 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   }
 
   @keyframes chatSlideIn {
@@ -156,6 +160,17 @@
     to {
       opacity: 1;
       transform: translateX(0);
+    }
+  }
+
+  @keyframes chatSlideOut {
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(30px);
     }
   }
 

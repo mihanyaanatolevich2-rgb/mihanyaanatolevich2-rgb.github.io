@@ -75,8 +75,13 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [participantNames, setParticipantNames] = useState<Map<string, string>>(new Map());
   const [participantAvatars, setParticipantAvatars] = useState<Map<string, string | null>>(new Map());
   const [zoomImage, setZoomImage] = useState<string | null>(null);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [zoomPos, setZoomPos] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
   const [wallpaperStyle, setWallpaperStyle] = useState<React.CSSProperties>({});
+  const [isExiting, setIsExiting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -623,7 +628,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
                 )}
                 {msg.message_type === 'image' && msg.file_url && (
                   <div className="relative group">
-                    <img src={msg.file_url} alt={msg.file_name || 'image'} className="max-w-full rounded-lg cursor-pointer" onClick={() => setZoomImage(msg.file_url)} />
+                    <img src={msg.file_url} alt={msg.file_name || 'image'} className="rounded-lg cursor-pointer object-cover" style={{ maxWidth: '240px', maxHeight: '240px' }} onClick={() => setZoomImage(msg.file_url)} />
                     <Button variant="secondary" size="icon" className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => { e.stopPropagation(); downloadFile(msg.file_url!, msg.file_name || 'image.jpg'); }}>
                       <Download className="h-3.5 w-3.5" />
                     </Button>
@@ -739,10 +744,13 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   }
 
   return (
-    <div className="flex h-full flex-col bg-background chat-slide-in">
+    <div className={`flex h-full flex-col bg-background ${isExiting ? 'chat-slide-out' : 'chat-slide-in'}`}>
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-        <Button variant="ghost" size="icon" onClick={onBack} className="md:hidden text-muted-foreground">
+        <Button variant="ghost" size="icon" onClick={() => {
+          setIsExiting(true);
+          setTimeout(() => onBack(), 250);
+        }} className="md:hidden text-muted-foreground">
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div className="relative">
@@ -883,10 +891,51 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       )}
 
       {/* Image zoom dialog */}
-      <Dialog open={!!zoomImage} onOpenChange={(o) => !o && setZoomImage(null)}>
-        <DialogContent className="bg-transparent border-none shadow-none max-w-[90vw] max-h-[90vh] p-0 flex items-center justify-center">
+      <Dialog open={!!zoomImage} onOpenChange={(o) => { if (!o) { setZoomImage(null); setZoomScale(1); setZoomPos({ x: 0, y: 0 }); } }}>
+        <DialogContent className="bg-black/90 border-none shadow-none max-w-[100vw] max-h-[100vh] w-screen h-screen p-0 flex items-center justify-center overflow-hidden"
+          onWheel={(e) => {
+            e.preventDefault();
+            setZoomScale(prev => Math.min(5, Math.max(1, prev + (e.deltaY > 0 ? -0.3 : 0.3))));
+          }}
+          onDoubleClick={() => {
+            if (zoomScale > 1) { setZoomScale(1); setZoomPos({ x: 0, y: 0 }); }
+            else setZoomScale(2.5);
+          }}
+          onMouseDown={(e) => { if (zoomScale > 1) { setIsDragging(true); setDragStart({ x: e.clientX - zoomPos.x, y: e.clientY - zoomPos.y }); } }}
+          onMouseMove={(e) => { if (isDragging) setZoomPos({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y }); }}
+          onMouseUp={() => setIsDragging(false)}
+          onMouseLeave={() => setIsDragging(false)}
+          onTouchStart={(e) => {
+            if (e.touches.length === 1 && zoomScale > 1) {
+              setIsDragging(true);
+              setDragStart({ x: e.touches[0].clientX - zoomPos.x, y: e.touches[0].clientY - zoomPos.y });
+            }
+          }}
+          onTouchMove={(e) => {
+            if (e.touches.length === 2) {
+              const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+              const prev = (e.target as any).__lastPinchDist || dist;
+              (e.target as any).__lastPinchDist = dist;
+              setZoomScale(s => Math.min(5, Math.max(1, s * (dist / prev))));
+            } else if (isDragging && e.touches.length === 1) {
+              setZoomPos({ x: e.touches[0].clientX - dragStart.x, y: e.touches[0].clientY - dragStart.y });
+            }
+          }}
+          onTouchEnd={(e) => { if (e.touches.length < 2) { (e.target as any).__lastPinchDist = undefined; } setIsDragging(false); }}
+        >
           {zoomImage && (
-            <img src={zoomImage} alt="zoom" className="max-w-full max-h-[85vh] rounded-lg object-contain" onClick={() => setZoomImage(null)} />
+            <img
+              src={zoomImage}
+              alt="zoom"
+              className="max-w-full max-h-[85vh] rounded-lg object-contain select-none"
+              style={{
+                transform: `translate(${zoomPos.x}px, ${zoomPos.y}px) scale(${zoomScale})`,
+                transition: isDragging ? 'none' : 'transform 0.2s ease-out',
+                cursor: zoomScale > 1 ? 'grab' : 'zoom-in',
+              }}
+              draggable={false}
+              onClick={() => { if (zoomScale <= 1) { setZoomImage(null); setZoomScale(1); setZoomPos({ x: 0, y: 0 }); } }}
+            />
           )}
         </DialogContent>
       </Dialog>
