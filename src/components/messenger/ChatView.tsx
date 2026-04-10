@@ -312,7 +312,18 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
         const newMsg = payload.new as Message;
-        setMessages(prev => [...prev, newMsg]);
+        setMessages(prev => {
+          // Deduplicate: if already present (from optimistic insert), replace temp
+          if (prev.some(m => m.id === newMsg.id)) return prev;
+          // Also replace any temp message with matching content/time
+          const tempIdx = prev.findIndex(m => m.id.startsWith('temp-') && m.content === newMsg.content && m.sender_id === newMsg.sender_id);
+          if (tempIdx >= 0) {
+            const copy = [...prev];
+            copy[tempIdx] = newMsg;
+            return copy;
+          }
+          return [...prev, newMsg];
+        });
         if (newMsg.sender_id !== user?.id) {
           markMessagesRead([newMsg]);
         }
