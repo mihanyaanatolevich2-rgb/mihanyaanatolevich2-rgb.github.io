@@ -519,7 +519,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                     key={wp.id}
                     onClick={() => { setWallpaperId(wp.id); if (wp.id !== 'custom') setCustomWallpaper(''); }}
                     className={`h-16 rounded-lg border-2 transition-all duration-200 text-[10px] text-muted-foreground flex items-end justify-center pb-1 ${wallpaperId === wp.id ? 'border-primary' : 'border-border'}`}
-                    style={wp.css ? { background: `${wp.css}, hsl(var(--background))`, backgroundSize: wp.size } : { background: 'hsl(var(--background))' }}
+                    style={typeof wp.css === 'function' && wp.css(wallpaperColor) ? { background: `${wp.css(wallpaperColor)}, hsl(var(--background))`, backgroundSize: wp.size } : { background: 'hsl(var(--background))' }}
                   >
                     {wp.name}
                   </button>
@@ -533,6 +533,24 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 </button>
               </div>
               <input ref={wallpaperInputRef} type="file" accept="image/*" onChange={handleWallpaperUpload} className="hidden" />
+              
+              {/* Wallpaper color */}
+              {wallpaperId !== 'none' && wallpaperId !== 'custom' && (
+                <div className="mt-3">
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Цвет обоев</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {WALLPAPER_COLORS.map((wc) => (
+                      <button
+                        key={wc.name}
+                        onClick={() => setWallpaperColor(wc.color)}
+                        className={`h-7 w-7 rounded-full transition-all duration-200 border-2 ${wallpaperColor === wc.color ? 'border-foreground scale-110' : 'border-border'}`}
+                        style={{ backgroundColor: wc.color ? `hsl(${wc.color})` : 'hsl(var(--muted))' }}
+                        title={wc.name}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Scale */}
