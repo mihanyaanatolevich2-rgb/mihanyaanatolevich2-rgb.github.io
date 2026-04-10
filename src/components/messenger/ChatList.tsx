@@ -51,13 +51,24 @@ const ACCENT_COLORS = [
   { name: 'Красный', hue: 0, primary: '0 70% 55%' },
 ];
 
+const WALLPAPER_COLORS = [
+  { name: 'Без цвета', color: '' },
+  { name: 'Бирюзовый', color: '175 60% 50%' },
+  { name: 'Синий', color: '220 60% 50%' },
+  { name: 'Фиолет', color: '270 50% 50%' },
+  { name: 'Зелёный', color: '142 50% 45%' },
+  { name: 'Оранж', color: '25 80% 50%' },
+  { name: 'Розовый', color: '330 60% 50%' },
+  { name: 'Красный', color: '0 60% 50%' },
+];
+
 const BUILTIN_WALLPAPERS = [
   { id: 'none', name: 'Нет', css: '' },
-  { id: 'dots', name: 'Точки', css: 'radial-gradient(circle, hsl(var(--muted-foreground) / 0.08) 1px, transparent 1px)' , size: '20px 20px' },
-  { id: 'grid', name: 'Сетка', css: 'linear-gradient(hsl(var(--muted-foreground) / 0.05) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--muted-foreground) / 0.05) 1px, transparent 1px)', size: '24px 24px' },
-  { id: 'diagonal', name: 'Диагональ', css: 'repeating-linear-gradient(45deg, transparent, transparent 10px, hsl(var(--muted-foreground) / 0.03) 10px, hsl(var(--muted-foreground) / 0.03) 11px)', size: 'auto' },
-  { id: 'bubbles', name: 'Пузырьки', css: 'radial-gradient(circle at 20% 80%, hsl(var(--primary) / 0.04) 0%, transparent 50%), radial-gradient(circle at 80% 20%, hsl(var(--primary) / 0.06) 0%, transparent 50%), radial-gradient(circle at 50% 50%, hsl(var(--primary) / 0.02) 0%, transparent 70%)', size: 'auto' },
-  { id: 'waves', name: 'Волны', css: 'repeating-linear-gradient(135deg, transparent, transparent 20px, hsl(var(--primary) / 0.03) 20px, hsl(var(--primary) / 0.03) 40px)', size: 'auto' },
+  { id: 'dots', name: 'Точки', css: (c: string) => `radial-gradient(circle, hsl(${c || 'var(--muted-foreground)'} / 0.12) 1px, transparent 1px)`, size: '20px 20px' },
+  { id: 'grid', name: 'Сетка', css: (c: string) => `linear-gradient(hsl(${c || 'var(--muted-foreground)'} / 0.08) 1px, transparent 1px), linear-gradient(90deg, hsl(${c || 'var(--muted-foreground)'} / 0.08) 1px, transparent 1px)`, size: '24px 24px' },
+  { id: 'diagonal', name: 'Диагональ', css: (c: string) => `repeating-linear-gradient(45deg, transparent, transparent 10px, hsl(${c || 'var(--muted-foreground)'} / 0.06) 10px, hsl(${c || 'var(--muted-foreground)'} / 0.06) 11px)`, size: 'auto' },
+  { id: 'bubbles', name: 'Пузырьки', css: (c: string) => `radial-gradient(circle at 20% 80%, hsl(${c || 'var(--primary)'} / 0.08) 0%, transparent 50%), radial-gradient(circle at 80% 20%, hsl(${c || 'var(--primary)'} / 0.1) 0%, transparent 50%), radial-gradient(circle at 50% 50%, hsl(${c || 'var(--primary)'} / 0.04) 0%, transparent 70%)`, size: 'auto' },
+  { id: 'waves', name: 'Волны', css: (c: string) => `repeating-linear-gradient(135deg, transparent, transparent 20px, hsl(${c || 'var(--primary)'} / 0.06) 20px, hsl(${c || 'var(--primary)'} / 0.06) 40px)`, size: 'auto' },
 ];
 
 const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
