@@ -117,9 +117,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   });
 
   // Saved messages conversation ID
-  const [savedConvId, setSavedConvId] = useState<string | null>(() => {
-    return localStorage.getItem('saved-messages-conv-id');
-  });
+  const [savedConvId, setSavedConvId] = useState<string | null>(null);
 
   // Weather
   const [weatherCity, setWeatherCity] = useState(() => localStorage.getItem('weather-city') || 'Moscow');
