@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon, Camera, Palette } from 'lucide-react';
+import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon, Camera, Palette, ChevronDown, ChevronUp, CloudSun, Bookmark, Clock, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -33,6 +33,7 @@ interface ChatItem {
   lastMessage?: string;
   lastMessageAt?: string;
   isGroup?: boolean;
+  isSavedMessages?: boolean;
   unreadCount: number;
 }
 
@@ -70,6 +71,12 @@ const BUILTIN_WALLPAPERS = [
   { id: 'bubbles', name: 'Пузырьки', css: (c: string) => `radial-gradient(circle at 20% 80%, hsl(${c || 'var(--primary)'} / 0.08) 0%, transparent 50%), radial-gradient(circle at 80% 20%, hsl(${c || 'var(--primary)'} / 0.1) 0%, transparent 50%), radial-gradient(circle at 50% 50%, hsl(${c || 'var(--primary)'} / 0.04) 0%, transparent 70%)`, size: 'auto' },
   { id: 'waves', name: 'Волны', css: (c: string) => `repeating-linear-gradient(135deg, transparent, transparent 20px, hsl(${c || 'var(--primary)'} / 0.06) 20px, hsl(${c || 'var(--primary)'} / 0.06) 40px)`, size: 'auto' },
 ];
+
+interface WeatherData {
+  temp: number;
+  description: string;
+  icon: string;
+}
 
 const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const { user, signOut } = useAuth();
@@ -109,6 +116,123 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     return localStorage.getItem('app-wallpaper-color') || '';
   });
 
+  // Saved messages conversation ID
+  const [savedConvId, setSavedConvId] = useState<string | null>(() => {
+    return localStorage.getItem('saved-messages-conv-id');
+  });
+
+  // Weather
+  const [weatherCity, setWeatherCity] = useState(() => localStorage.getItem('weather-city') || 'Moscow');
+  const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
+  const [weatherOpen, setWeatherOpen] = useState(() => localStorage.getItem('weather-open') !== 'false');
+  const [editingCity, setEditingCity] = useState(false);
+  const [cityInput, setCityInput] = useState('');
+
+  // Digital Detox
+  const [detoxSeconds, setDetoxSeconds] = useState(0);
+  const detoxRef = useRef<number>(0);
+
+  // Start detox timer
+  useEffect(() => {
+    const today = new Date().toDateString();
+    const savedDate = localStorage.getItem('detox-date');
+    const savedSeconds = localStorage.getItem('detox-seconds');
+    if (savedDate === today && savedSeconds) {
+      detoxRef.current = Number(savedSeconds);
+      setDetoxSeconds(detoxRef.current);
+    } else {
+      localStorage.setItem('detox-date', today);
+      localStorage.setItem('detox-seconds', '0');
+      detoxRef.current = 0;
+    }
+    const interval = setInterval(() => {
+      detoxRef.current += 1;
+      setDetoxSeconds(detoxRef.current);
+      localStorage.setItem('detox-seconds', String(detoxRef.current));
+      // Reset if day changed
+      const nowDate = new Date().toDateString();
+      if (nowDate !== localStorage.getItem('detox-date')) {
+        localStorage.setItem('detox-date', nowDate);
+        detoxRef.current = 0;
+        localStorage.setItem('detox-seconds', '0');
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatDetoxTime = (s: number) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h > 0) return `${h}ч ${m}м`;
+    return `${m}м ${s % 60}с`;
+  };
+
+  // Fetch weather
+  useEffect(() => {
+    if (!weatherCity) return;
+    const fetchWeather = async () => {
+      try {
+        const res = await fetch(`https://wttr.in/${encodeURIComponent(weatherCity)}?format=j1`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const current = data.current_condition?.[0];
+        if (current) {
+          setWeatherData({
+            temp: Number(current.temp_C),
+            description: current.lang_ru?.[0]?.value || current.weatherDesc?.[0]?.value || '',
+            icon: getWeatherEmoji(Number(current.weatherCode)),
+          });
+        }
+      } catch { /* ignore */ }
+    };
+    fetchWeather();
+    const interval = setInterval(fetchWeather, 600000); // refresh every 10 min
+    return () => clearInterval(interval);
+  }, [weatherCity]);
+
+  const getWeatherEmoji = (code: number): string => {
+    if (code === 113) return '☀️';
+    if (code === 116) return '⛅';
+    if (code === 119 || code === 122) return '☁️';
+    if ([176, 263, 266, 293, 296, 299, 302, 305, 308, 311, 314, 317, 353, 356, 359].includes(code)) return '🌧️';
+    if ([179, 182, 185, 227, 230, 320, 323, 326, 329, 332, 335, 338, 350, 362, 365, 368, 371, 374, 377, 392, 395].includes(code)) return '🌨️';
+    if ([200, 386, 389].includes(code)) return '⛈️';
+    return '🌤️';
+  };
+
+  const saveCity = () => {
+    if (cityInput.trim()) {
+      setWeatherCity(cityInput.trim());
+      localStorage.setItem('weather-city', cityInput.trim());
+    }
+    setEditingCity(false);
+  };
+
+  // Create or get saved messages conversation
+  useEffect(() => {
+    if (!user) return;
+    const existing = localStorage.getItem('saved-messages-conv-id');
+    if (existing) {
+      setSavedConvId(existing);
+      return;
+    }
+    // Create a self-conversation
+    (async () => {
+      const { data: conv, error: convErr } = await supabase
+        .from('conversations')
+        .insert({ name: '⭐ Избранное', is_group: false })
+        .select('id')
+        .single();
+      if (convErr || !conv) return;
+      await supabase.from('conversation_participants').insert({
+        conversation_id: conv.id,
+        user_id: user.id,
+      });
+      localStorage.setItem('saved-messages-conv-id', conv.id);
+      setSavedConvId(conv.id);
+    })();
+  }, [user]);
+
   // Load my profile
   useEffect(() => {
     if (!user) return;
@@ -133,7 +257,6 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const accent = ACCENT_COLORS[accentIndex] || ACCENT_COLORS[0];
     document.documentElement.style.setProperty('--primary', accent.primary);
     document.documentElement.style.setProperty('--ring', accent.primary);
-    // Update message-own color based on accent
     const lightTheme = theme === 'light';
     if (lightTheme) {
       document.documentElement.style.setProperty('--message-own', `${accent.hue} 50% 88%`);
@@ -166,6 +289,11 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     localStorage.setItem('msg-max-chars', String(maxChars));
     window.dispatchEvent(new Event('msg-max-chars-changed'));
   }, [maxChars]);
+
+  // Save weather open state
+  useEffect(() => {
+    localStorage.setItem('weather-open', String(weatherOpen));
+  }, [weatherOpen]);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -266,12 +394,15 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const chatItems: ChatItem[] = convIds.map(convId => {
       const conv = convMap.get(convId);
       const isGroup = conv?.is_group || false;
+      const isSaved = convId === savedConvId;
       let name = 'Unknown';
       let email = '';
       let contactUserId = '';
       let avatarUrl: string | null = null;
 
-      if (isGroup) {
+      if (isSaved) {
+        name = '⭐ Избранное';
+      } else if (isGroup) {
         name = conv?.name || 'Группа';
       } else {
         const others = (convPartsMap.get(convId) || []).filter(id => id !== user.id);
@@ -301,18 +432,22 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         lastMessage,
         lastMessageAt: lastMsg?.created_at,
         isGroup,
+        isSavedMessages: isSaved,
         unreadCount: unreadMap.get(convId) || 0,
       };
-    }).filter(c => c.participantName !== 'Unknown' || c.isGroup);
+    }).filter(c => c.participantName !== 'Unknown' || c.isGroup || c.isSavedMessages);
 
+    // Sort: saved messages always first, then by last message
     chatItems.sort((a, b) => {
+      if (a.isSavedMessages) return -1;
+      if (b.isSavedMessages) return 1;
       if (!a.lastMessageAt) return 1;
       if (!b.lastMessageAt) return -1;
       return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
     });
 
     setChats(chatItems);
-  }, [user]);
+  }, [user, savedConvId]);
 
   useEffect(() => { loadChats(); }, [loadChats]);
 
@@ -388,6 +523,58 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         </div>
       </div>
 
+      {/* Weather widget - collapsible */}
+      <div className="border-b border-sidebar-border">
+        <button
+          onClick={() => setWeatherOpen(!weatherOpen)}
+          className="flex w-full items-center justify-between px-4 py-2 text-xs text-muted-foreground hover:bg-sidebar-accent transition-colors"
+        >
+          <div className="flex items-center gap-1.5">
+            <CloudSun className="h-3.5 w-3.5" />
+            <span>Погода</span>
+          </div>
+          {weatherOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </button>
+        {weatherOpen && (
+          <div className="px-4 pb-2.5 animate-in slide-in-from-top-2 duration-200">
+            {weatherData ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">{weatherData.icon}</span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{weatherData.temp}°C</p>
+                    <p className="text-[10px] text-muted-foreground leading-tight">{weatherData.description}</p>
+                  </div>
+                </div>
+                {editingCity ? (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      value={cityInput}
+                      onChange={(e) => setCityInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && saveCity()}
+                      className="h-6 w-24 text-[10px] bg-secondary border-none px-2"
+                      placeholder="Город..."
+                      autoFocus
+                      onBlur={saveCity}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setCityInput(weatherCity); setEditingCity(true); }}
+                    className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    <MapPin className="h-3 w-3" />
+                    {weatherCity}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Загрузка...</p>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Search */}
       <div className="px-3 py-2">
         <div className="relative">
@@ -408,7 +595,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 <Avatar className="h-10 w-10 shrink-0">
                   {chat.participantAvatarUrl && <AvatarImage src={chat.participantAvatarUrl} />}
                   <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
-                    {chat.isGroup ? '👥' : chat.participantName.charAt(0).toUpperCase()}
+                    {chat.isSavedMessages ? '⭐' : chat.isGroup ? '👥' : chat.participantName.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1 text-left">
@@ -423,7 +610,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
               </button>
             </ContextMenuTrigger>
             <ContextMenuContent className="bg-popover border-border">
-              {!chat.isGroup && chat.participantUserId && (
+              {!chat.isGroup && !chat.isSavedMessages && chat.participantUserId && (
                 <ContextMenuItem onClick={() => { setRenameDialog({ open: true, userId: chat.participantUserId!, currentName: chat.participantName }); setNickname(chat.participantName); }} className="gap-2">
                   <Edit2 className="h-4 w-4" /> Переименовать
                 </ContextMenuItem>
@@ -480,6 +667,16 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 <p className="text-sm font-semibold text-foreground truncate">{myProfile?.display_name || myProfile?.username || ''}</p>
                 <p className="text-xs text-muted-foreground truncate">{user?.email || ''}</p>
               </div>
+            </div>
+
+            {/* Digital Detox */}
+            <div className="rounded-lg bg-secondary/50 p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <label className="text-sm font-medium text-foreground">Digital Detox</label>
+              </div>
+              <p className="text-xs text-muted-foreground mb-1">Время в приложении сегодня</p>
+              <p className="text-lg font-bold text-primary">{formatDetoxTime(detoxSeconds)}</p>
             </div>
 
             {/* Theme toggle */}
@@ -551,6 +748,23 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Weather city setting */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <MapPin className="h-4 w-4 text-muted-foreground" />
+                <label className="text-sm font-medium text-foreground">Город для погоды</label>
+              </div>
+              <Input
+                value={weatherCity}
+                onChange={(e) => {
+                  setWeatherCity(e.target.value);
+                  localStorage.setItem('weather-city', e.target.value);
+                }}
+                className="bg-secondary border-none text-sm"
+                placeholder="Введите город..."
+              />
             </div>
 
             {/* Scale */}
