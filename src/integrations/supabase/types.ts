@@ -110,21 +110,27 @@ export type Database = {
       }
       conversations: {
         Row: {
+          avatar_url: string | null
           created_at: string
+          created_by: string | null
           id: string
           is_group: boolean
           name: string | null
           updated_at: string
         }
         Insert: {
+          avatar_url?: string | null
           created_at?: string
+          created_by?: string | null
           id?: string
           is_group?: boolean
           name?: string | null
           updated_at?: string
         }
         Update: {
+          avatar_url?: string | null
           created_at?: string
+          created_by?: string | null
           id?: string
           is_group?: boolean
           name?: string | null
@@ -160,6 +166,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      group_admins: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          granted_by: string | null
+          id: string
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          granted_by?: string | null
+          id?: string
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          granted_by?: string | null
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       message_reactions: {
         Row: {
@@ -436,6 +466,10 @@ export type Database = {
         Returns: string
       }
       get_my_conversation_ids: { Args: never; Returns: string[] }
+      is_group_admin: {
+        Args: { _conversation_id: string; _user_id: string }
+        Returns: boolean
+      }
       search_profiles: {
         Args: { search_term: string }
         Returns: {

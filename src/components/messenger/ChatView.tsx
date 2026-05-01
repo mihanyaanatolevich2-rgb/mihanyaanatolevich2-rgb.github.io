@@ -18,6 +18,7 @@ import {
   DialogContent,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import GroupInfoDialog from './GroupInfoDialog';
 
 interface Message {
   id: string;
@@ -64,6 +65,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
   const [isGroup, setIsGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
   const [isCaller, setIsCaller] = useState(false);
@@ -190,13 +193,14 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
       const { data: conv } = await supabase
         .from('conversations')
-        .select('name, is_group')
+        .select('name, is_group, avatar_url')
         .eq('id', conversationId)
         .single();
 
       if (conv?.is_group) {
         setIsGroup(true);
         setGroupName(conv.name || 'Группа');
+        setGroupAvatarUrl((conv as any).avatar_url || null);
         const { data: parts } = await supabase
           .from('conversation_participants')
           .select('user_id')
@@ -376,6 +380,27 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         filter: `conversation_id=eq.${conversationId}`,
       }, () => {
         loadPinnedMessages();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [conversationId]);
+
+  // Realtime: conversation name/avatar updates
+  useEffect(() => {
+    if (!conversationId) return;
+    const channel = supabase
+      .channel(`conv-${conversationId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'conversations',
+        filter: `id=eq.${conversationId}`,
+      }, (payload) => {
+        const n = payload.new as any;
+        if (n.is_group) {
+          if (typeof n.name === 'string') setGroupName(n.name || 'Группа');
+          setGroupAvatarUrl(n.avatar_url || null);
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -793,11 +818,16 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           <Avatar
             className="h-9 w-9 cursor-pointer"
             onClick={() => {
-              const url = isGroup ? null : partnerAvatarUrl;
-              if (url) setZoomImage(url);
+              if (isGroup) {
+                if (groupAvatarUrl) setZoomImage(groupAvatarUrl);
+                else setShowGroupInfo(true);
+                return;
+              }
+              if (partnerAvatarUrl) setZoomImage(partnerAvatarUrl);
             }}
           >
             {!isGroup && partnerAvatarUrl && <AvatarImage src={partnerAvatarUrl} />}
+            {isGroup && groupAvatarUrl && <AvatarImage src={groupAvatarUrl} />}
             <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
               {displayName.charAt(0).toUpperCase()}
             </AvatarFallback>
@@ -806,10 +836,14 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-[hsl(var(--online))] border-2 border-background" />
           )}
         </div>
-        <div className="flex-1">
+        <button
+          type="button"
+          onClick={() => isGroup && setShowGroupInfo(true)}
+          className={`flex-1 text-left ${isGroup ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'}`}
+        >
           <p className="text-sm font-semibold text-foreground">{displayName}</p>
-          {isGroup && <p className="text-xs text-muted-foreground">Группа</p>}
-        </div>
+          {isGroup && <p className="text-xs text-muted-foreground">Нажмите для информации</p>}
+        </button>
         {!isGroup && (
           <>
             <Button variant="ghost" size="icon" onClick={() => startCall('audio')} className="text-muted-foreground hover:text-primary">
@@ -975,6 +1009,14 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           )}
         </DialogContent>
       </Dialog>
+
+      {isGroup && (
+        <GroupInfoDialog
+          open={showGroupInfo}
+          onOpenChange={setShowGroupInfo}
+          conversationId={conversationId}
+        />
+      )}
     </div>
   );
 };

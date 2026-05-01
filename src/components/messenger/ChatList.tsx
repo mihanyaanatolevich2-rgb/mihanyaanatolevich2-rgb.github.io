@@ -165,20 +165,34 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     return `${m}м ${s % 60}с`;
   };
 
-  // Fetch weather
+  // Fetch weather via Open-Meteo (works in Russia, no API key)
   useEffect(() => {
     if (!weatherCity) return;
     const fetchWeather = async () => {
       try {
-        const res = await fetch(`https://wttr.in/${encodeURIComponent(weatherCity)}?format=j1`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const current = data.current_condition?.[0];
+        // 1) Geocode city -> lat/lon (Open-Meteo geocoding works in RF)
+        const geoRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(weatherCity)}&count=1&language=ru&format=json`
+        );
+        if (!geoRes.ok) return;
+        const geo = await geoRes.json();
+        const place = geo?.results?.[0];
+        if (!place) return;
+
+        // 2) Fetch current weather
+        const wRes = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code,is_day&timezone=auto`
+        );
+        if (!wRes.ok) return;
+        const w = await wRes.json();
+        const current = w?.current;
         if (current) {
+          const code = Number(current.weather_code);
+          const isDay = Number(current.is_day) === 1;
           setWeatherData({
-            temp: Number(current.temp_C),
-            description: current.lang_ru?.[0]?.value || current.weatherDesc?.[0]?.value || '',
-            icon: getWeatherEmoji(Number(current.weatherCode)),
+            temp: Math.round(Number(current.temperature_2m)),
+            description: describeWmo(code),
+            icon: getWeatherEmoji(code, isDay),
           });
         }
       } catch { /* ignore */ }
@@ -188,24 +202,45 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     return () => clearInterval(interval);
   }, [weatherCity]);
 
-  const getWeatherEmoji = (code: number): string => {
-    const hour = new Date().getHours();
-    const isNight = hour < 6 || hour >= 21;
-    const isEvening = hour >= 18 && hour < 21;
-    const isMorning = hour >= 6 && hour < 10;
+  // Open-Meteo uses WMO weather codes
+  const describeWmo = (code: number): string => {
+    if (code === 0) return 'Ясно';
+    if (code === 1) return 'Преимущественно ясно';
+    if (code === 2) return 'Переменная облачность';
+    if (code === 3) return 'Пасмурно';
+    if ([45, 48].includes(code)) return 'Туман';
+    if ([51, 53, 55].includes(code)) return 'Морось';
+    if ([56, 57].includes(code)) return 'Ледяная морось';
+    if ([61, 63, 65].includes(code)) return 'Дождь';
+    if ([66, 67].includes(code)) return 'Ледяной дождь';
+    if ([71, 73, 75].includes(code)) return 'Снег';
+    if (code === 77) return 'Снежная крупа';
+    if ([80, 81, 82].includes(code)) return 'Ливни';
+    if ([85, 86].includes(code)) return 'Снегопад';
+    if (code === 95) return 'Гроза';
+    if ([96, 99].includes(code)) return 'Гроза с градом';
+    return '';
+  };
 
-    // Clear sky - time-dependent
-    if (code === 113) {
+  const getWeatherEmoji = (code: number, isDay = true): string => {
+    const hour = new Date().getHours();
+    const isNight = !isDay || hour < 6 || hour >= 21;
+    const isEvening = isDay && hour >= 18 && hour < 21;
+    const isMorning = isDay && hour >= 6 && hour < 10;
+
+    // Clear
+    if (code === 0 || code === 1) {
       if (isNight) return '🌙';
       if (isEvening) return '🌇';
       if (isMorning) return '🌅';
       return '☀️';
     }
-    if (code === 116) return isNight ? '☁️' : '⛅';
-    if (code === 119 || code === 122) return '☁️';
-    if ([176, 263, 266, 293, 296, 299, 302, 305, 308, 311, 314, 317, 353, 356, 359].includes(code)) return '🌧️';
-    if ([179, 182, 185, 227, 230, 320, 323, 326, 329, 332, 335, 338, 350, 362, 365, 368, 371, 374, 377, 392, 395].includes(code)) return '🌨️';
-    if ([200, 386, 389].includes(code)) return '⛈️';
+    if (code === 2) return isNight ? '☁️' : '⛅';
+    if (code === 3) return '☁️';
+    if ([45, 48].includes(code)) return '🌫️';
+    if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return '🌧️';
+    if ([71, 73, 75, 77, 85, 86].includes(code)) return '🌨️';
+    if ([95, 96, 99].includes(code)) return '⛈️';
     return isNight ? '🌙' : '🌤️';
   };
 
@@ -387,7 +422,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const lastReadMap = new Map(myParts.map(p => [p.conversation_id, p.last_read_at]));
 
     const [convRes, allPartsRes, nicknamesRes, messagesRes] = await Promise.all([
-      supabase.from('conversations').select('id, name, is_group').in('id', convIds),
+      supabase.from('conversations').select('id, name, is_group, avatar_url').in('id', convIds),
       supabase.from('conversation_participants').select('conversation_id, user_id').in('conversation_id', convIds),
       supabase.from('contact_nicknames').select('contact_user_id, nickname').eq('user_id', user.id),
       supabase.from('messages').select('conversation_id, content, created_at, message_type, sender_id')
@@ -450,6 +485,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         name = '⭐ Избранное';
       } else if (isGroup) {
         name = conv?.name || 'Группа';
+        avatarUrl = (conv as any)?.avatar_url || null;
       } else {
         const others = (convPartsMap.get(convId) || []).filter(id => id !== user.id);
         if (others.length > 0) {
