@@ -422,7 +422,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const lastReadMap = new Map(myParts.map(p => [p.conversation_id, p.last_read_at]));
 
     const [convRes, allPartsRes, nicknamesRes, messagesRes] = await Promise.all([
-      supabase.from('conversations').select('id, name, is_group').in('id', convIds),
+      supabase.from('conversations').select('id, name, is_group, avatar_url').in('id', convIds),
       supabase.from('conversation_participants').select('conversation_id, user_id').in('conversation_id', convIds),
       supabase.from('contact_nicknames').select('contact_user_id, nickname').eq('user_id', user.id),
       supabase.from('messages').select('conversation_id, content, created_at, message_type, sender_id')
