@@ -64,6 +64,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
   const [isGroup, setIsGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
   const [isCaller, setIsCaller] = useState(false);
