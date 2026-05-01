@@ -797,11 +797,16 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           <Avatar
             className="h-9 w-9 cursor-pointer"
             onClick={() => {
-              const url = isGroup ? null : partnerAvatarUrl;
-              if (url) setZoomImage(url);
+              if (isGroup) {
+                if (groupAvatarUrl) setZoomImage(groupAvatarUrl);
+                else setShowGroupInfo(true);
+                return;
+              }
+              if (partnerAvatarUrl) setZoomImage(partnerAvatarUrl);
             }}
           >
             {!isGroup && partnerAvatarUrl && <AvatarImage src={partnerAvatarUrl} />}
+            {isGroup && groupAvatarUrl && <AvatarImage src={groupAvatarUrl} />}
             <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
               {displayName.charAt(0).toUpperCase()}
             </AvatarFallback>
@@ -810,10 +815,14 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-[hsl(var(--online))] border-2 border-background" />
           )}
         </div>
-        <div className="flex-1">
+        <button
+          type="button"
+          onClick={() => isGroup && setShowGroupInfo(true)}
+          className={`flex-1 text-left ${isGroup ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'}`}
+        >
           <p className="text-sm font-semibold text-foreground">{displayName}</p>
-          {isGroup && <p className="text-xs text-muted-foreground">Группа</p>}
-        </div>
+          {isGroup && <p className="text-xs text-muted-foreground">Нажмите для информации</p>}
+        </button>
         {!isGroup && (
           <>
             <Button variant="ghost" size="icon" onClick={() => startCall('audio')} className="text-muted-foreground hover:text-primary">
