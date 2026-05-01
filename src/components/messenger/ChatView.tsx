@@ -192,13 +192,14 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
       const { data: conv } = await supabase
         .from('conversations')
-        .select('name, is_group')
+        .select('name, is_group, avatar_url')
         .eq('id', conversationId)
         .single();
 
       if (conv?.is_group) {
         setIsGroup(true);
         setGroupName(conv.name || 'Группа');
+        setGroupAvatarUrl((conv as any).avatar_url || null);
         const { data: parts } = await supabase
           .from('conversation_participants')
           .select('user_id')
