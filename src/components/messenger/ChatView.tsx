@@ -473,32 +473,38 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0 || !user) return;
 
     setUploading(true);
-    const ext = file.name.split('.').pop();
-    const path = `${user.id}/${Date.now()}.${ext}`;
 
-    const { error } = await supabase.storage.from('chat-media').upload(path, file);
-    if (error) {
-      setUploading(false);
-      return;
+    const uploadOne = async (file: File, idx: number) => {
+      const ext = file.name.split('.').pop();
+      const path = `${user.id}/${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+      const { error } = await supabase.storage.from('chat-media').upload(path, file);
+      if (error) return null;
+
+      const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
+
+      let messageType = 'file';
+      if (file.type.startsWith('image/')) messageType = 'image';
+      else if (file.type.startsWith('video/')) messageType = 'video';
+
+      return {
+        conversation_id: conversationId,
+        sender_id: user.id,
+        message_type: messageType,
+        file_url: urlData.publicUrl,
+        file_name: file.name,
+      };
+    };
+
+    // Параллельно грузим все файлы, потом одним батчем вставляем сообщения
+    const rows = (await Promise.all(files.map(uploadOne))).filter(Boolean) as any[];
+    if (rows.length > 0) {
+      await supabase.from('messages').insert(rows);
     }
-
-    const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path);
-
-    let messageType = 'file';
-    if (file.type.startsWith('image/')) messageType = 'image';
-    else if (file.type.startsWith('video/')) messageType = 'video';
-
-    await supabase.from('messages').insert({
-      conversation_id: conversationId,
-      sender_id: user.id,
-      message_type: messageType,
-      file_url: urlData.publicUrl,
-      file_name: file.name,
-    });
 
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -940,7 +946,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </div>
       ) : (
         <div className="flex items-center gap-2 border-t border-border px-4 py-3">
-          <input ref={fileInputRef} type="file" onChange={handleFileUpload} className="hidden" accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip" />
+          <input ref={fileInputRef} type="file" multiple onChange={handleFileUpload} className="hidden" accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip" />
           <Button type="button" variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="text-muted-foreground hover:text-primary shrink-0">
             <Paperclip className="h-5 w-5" />
           </Button>
