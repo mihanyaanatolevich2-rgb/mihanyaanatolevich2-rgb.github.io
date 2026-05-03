@@ -229,7 +229,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
           .limit(1);
 
         const answer = (answers as unknown as CallSignalRow[] | null)?.[0];
-        if (answer && pc.signalingState === 'have-local-offer') {
+        if (answer && isSessionDescription(answer.signal_data) && pc.signalingState === 'have-local-offer') {
           await pc.setRemoteDescription(new RTCSessionDescription(answer.signal_data));
           remoteDescSetRef.current = true;
           await flushCandidates();
@@ -274,6 +274,10 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         return;
       }
 
+      if (!isSessionDescription(offer.signal_data)) {
+        onEnd();
+        return;
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(offer.signal_data));
       remoteDescSetRef.current = true;
       await flushCandidates();
@@ -294,7 +298,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       if (iceCandidates) {
         for (const ic of iceCandidates) {
           try {
-            const candidate = (ic.signal_data as { candidate?: RTCIceCandidateInit }).candidate;
+            const candidate = getSignalCandidate(ic.signal_data);
             if (candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
           } catch { /* ignore */ }
         }
@@ -324,14 +328,15 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         if (!pc && signal.signal_type !== 'hang-up') return;
 
         try {
-          if (signal.signal_type === 'answer' && pc) {
+          if (signal.signal_type === 'answer' && pc && isSessionDescription(signal.signal_data)) {
             if (pc.signalingState === 'have-local-offer') {
               await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
               remoteDescSetRef.current = true;
               await flushCandidates();
             }
           } else if (signal.signal_type === 'ice-candidate') {
-            await addIceCandidate(signal.signal_data.candidate);
+            const candidate = getSignalCandidate(signal.signal_data);
+            if (candidate) await addIceCandidate(candidate);
           } else if (signal.signal_type === 'hang-up') {
             if (!endedRef.current) {
               endedRef.current = true;
