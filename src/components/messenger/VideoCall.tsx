@@ -10,17 +10,38 @@ interface VideoCallProps {
   partnerName: string;
   isVideo: boolean;
   isCaller: boolean;
+  callId?: string | null;
   onEnd: () => void;
 }
 
+type CallSignalRow = {
+  conversation_id: string;
+  sender_id: string;
+  receiver_id: string;
+  signal_type: string;
+  signal_data: unknown;
+  call_id?: string;
+  created_at?: string;
+};
+
+const isSessionDescription = (data: unknown): data is RTCSessionDescriptionInit => {
+  if (!data || typeof data !== 'object') return false;
+  const type = (data as { type?: unknown }).type;
+  return type === 'offer' || type === 'answer' || type === 'pranswer' || type === 'rollback';
+};
+
+const getSignalCandidate = (data: unknown): RTCIceCandidateInit | null => {
+  if (!data || typeof data !== 'object') return null;
+  const candidate = (data as { candidate?: unknown }).candidate;
+  return candidate && typeof candidate === 'object' ? candidate as RTCIceCandidateInit : null;
+};
+
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
+    { urls: 'stun:openrelay.metered.ca:80' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    // Free TURN servers for cross-network
     {
       urls: 'turn:openrelay.metered.ca:80',
       username: 'openrelayproject',
@@ -41,17 +62,12 @@ const ICE_SERVERS: RTCConfiguration = {
       username: 'openrelayproject',
       credential: 'openrelayproject',
     },
-    // Backup free TURN
-    {
-      urls: 'turn:relay1.expressturn.com:3478',
-      username: 'efPKVNXHZF5W0MHEPJ',
-      credential: 'aZ67r2OazE7ySsts',
-    },
   ],
   iceCandidatePoolSize: 10,
+  bundlePolicy: 'max-bundle',
 };
 
-const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, onEnd }: VideoCallProps) => {
+const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, callId, onEnd }: VideoCallProps) => {
   const { user } = useAuth();
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideo);
@@ -65,6 +81,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const endedRef = useRef(false);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const remoteDescSetRef = useRef(false);
+  const callIdRef = useRef(callId || crypto.randomUUID());
 
   const sendSignal = useCallback(async (type: string, data: object) => {
     if (!user) return;
@@ -73,8 +90,9 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       sender_id: user.id,
       receiver_id: partnerId,
       signal_type: type,
-      signal_data: data as any,
-    });
+      call_id: callIdRef.current,
+      signal_data: data,
+    } as never);
   }, [user, conversationId, partnerId]);
 
   const cleanup = useCallback(() => {
@@ -119,10 +137,14 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const setupPeerConnection = useCallback(async () => {
     if (!user) return null;
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: isVideo,
-    });
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+    } catch (error) {
+      if (!isVideo) throw error;
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      setIsVideoOff(true);
+    }
     localStreamRef.current = stream;
     if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
@@ -149,6 +171,12 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       if (pc.iceConnectionState === 'failed') {
         // Try ICE restart
         pc.restartIce();
+        if (isCaller && pc.signalingState === 'stable') {
+          pc.createOffer({ iceRestart: true }).then(async (offer) => {
+            await pc.setLocalDescription(offer);
+            await sendSignal('offer', { sdp: offer.sdp, type: offer.type, isVideo });
+          }).catch(() => undefined);
+        }
       }
       if (pc.iceConnectionState === 'disconnected') {
         // Wait a bit before ending
@@ -188,6 +216,27 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       });
       await pc.setLocalDescription(offer);
       await sendSignal('offer', { sdp: offer.sdp, type: offer.type, isVideo });
+
+      for (let i = 0; i < 60 && !remoteDescSetRef.current && !endedRef.current; i++) {
+        const { data: answers } = await supabase
+          .from('call_signals')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .eq('receiver_id', user.id)
+          .eq('signal_type', 'answer')
+          .eq('call_id', callIdRef.current)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        const answer = (answers as unknown as CallSignalRow[] | null)?.[0];
+        if (answer && isSessionDescription(answer.signal_data) && pc.signalingState === 'have-local-offer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer.signal_data));
+          remoteDescSetRef.current = true;
+          await flushCandidates();
+          break;
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
     } catch (err) {
       console.error('Failed to start call:', err);
       onEnd();
@@ -200,7 +249,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       if (!pc || !user) return;
 
       // Poll for offer with retry
-      let offer: any = null;
+      let offer: CallSignalRow | null = null;
       for (let i = 0; i < 10; i++) {
         const { data: signals } = await supabase
           .from('call_signals')
@@ -208,6 +257,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
           .eq('conversation_id', conversationId)
           .eq('receiver_id', user.id)
           .eq('signal_type', 'offer')
+          .eq('call_id', callIdRef.current)
           .order('created_at', { ascending: false })
           .limit(1);
 
@@ -224,6 +274,10 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         return;
       }
 
+      if (!isSessionDescription(offer.signal_data)) {
+        onEnd();
+        return;
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(offer.signal_data));
       remoteDescSetRef.current = true;
       await flushCandidates();
@@ -244,7 +298,8 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       if (iceCandidates) {
         for (const ic of iceCandidates) {
           try {
-            await pc.addIceCandidate(new RTCIceCandidate((ic.signal_data as any).candidate));
+            const candidate = getSignalCandidate(ic.signal_data);
+            if (candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
           } catch { /* ignore */ }
         }
       }
@@ -266,20 +321,22 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         table: 'call_signals',
         filter: `receiver_id=eq.${user.id}`,
       }, async (payload) => {
-        const signal = payload.new as any;
+        const signal = payload.new as CallSignalRow;
         if (signal.conversation_id !== conversationId) return;
+        if (signal.call_id && signal.call_id !== callIdRef.current) return;
         const pc = pcRef.current;
         if (!pc && signal.signal_type !== 'hang-up') return;
 
         try {
-          if (signal.signal_type === 'answer' && pc) {
+          if (signal.signal_type === 'answer' && pc && isSessionDescription(signal.signal_data)) {
             if (pc.signalingState === 'have-local-offer') {
               await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
               remoteDescSetRef.current = true;
               await flushCandidates();
             }
           } else if (signal.signal_type === 'ice-candidate') {
-            await addIceCandidate(signal.signal_data.candidate);
+            const candidate = getSignalCandidate(signal.signal_data);
+            if (candidate) await addIceCandidate(candidate);
           } else if (signal.signal_type === 'hang-up') {
             if (!endedRef.current) {
               endedRef.current = true;

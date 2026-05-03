@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       call_signals: {
         Row: {
+          call_id: string
           conversation_id: string
           created_at: string
           id: string
@@ -25,6 +26,7 @@ export type Database = {
           signal_type: string
         }
         Insert: {
+          call_id?: string
           conversation_id: string
           created_at?: string
           id?: string
@@ -34,6 +36,7 @@ export type Database = {
           signal_type: string
         }
         Update: {
+          call_id?: string
           conversation_id?: string
           created_at?: string
           id?: string

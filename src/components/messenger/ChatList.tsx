@@ -76,6 +76,7 @@ interface WeatherData {
   temp: number;
   description: string;
   icon: string;
+  city?: string;
 }
 
 const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
@@ -165,37 +166,19 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     return `${m}м ${s % 60}с`;
   };
 
-  // Fetch weather via Open-Meteo (works in Russia, no API key)
+  // Fetch weather through our backend so the browser does not depend on weather domains blocked by providers.
   useEffect(() => {
     if (!weatherCity) return;
     const fetchWeather = async () => {
       try {
-        // 1) Geocode city -> lat/lon (Open-Meteo geocoding works in RF)
-        const geoRes = await fetch(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(weatherCity)}&count=1&language=ru&format=json`
-        );
-        if (!geoRes.ok) return;
-        const geo = await geoRes.json();
-        const place = geo?.results?.[0];
-        if (!place) return;
-
-        // 2) Fetch current weather
-        const wRes = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code,is_day&timezone=auto`
-        );
-        if (!wRes.ok) return;
-        const w = await wRes.json();
-        const current = w?.current;
-        if (current) {
-          const code = Number(current.weather_code);
-          const isDay = Number(current.is_day) === 1;
-          setWeatherData({
-            temp: Math.round(Number(current.temperature_2m)),
-            description: describeWmo(code),
-            icon: getWeatherEmoji(code, isDay),
-          });
-        }
-      } catch { /* ignore */ }
+        const { data, error } = await supabase.functions.invoke('weather', {
+          body: { city: weatherCity },
+        });
+        if (error || typeof data?.temp !== 'number') throw error || new Error('No weather');
+        setWeatherData(data as WeatherData);
+      } catch {
+        setWeatherData({ temp: 0, description: 'Откройте прогноз', icon: '🌤️', city: weatherCity });
+      }
     };
     fetchWeather();
     const interval = setInterval(fetchWeather, 600000); // refresh every 10 min
@@ -624,8 +607,15 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">{weatherData.icon}</span>
                   <div>
-                    <p className="text-sm font-medium text-foreground">{weatherData.temp}°C</p>
-                    <p className="text-[10px] text-muted-foreground leading-tight">{weatherData.description}</p>
+                    <p className="text-sm font-medium text-foreground">{weatherData.temp === 0 && weatherData.description === 'Откройте прогноз' ? '—' : `${weatherData.temp}°C`}</p>
+                    <a
+                      href={`https://global-weather-world.lovable.app/?city=${encodeURIComponent(weatherCity)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] text-muted-foreground leading-tight hover:text-primary transition-colors"
+                    >
+                      {weatherData.description}
+                    </a>
                   </div>
                 </div>
                 {editingCity ? (
@@ -646,7 +636,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                     className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
                   >
                     <MapPin className="h-3 w-3" />
-                    {weatherCity}
+                    {weatherData.city || weatherCity}
                   </button>
                 )}
               </div>
