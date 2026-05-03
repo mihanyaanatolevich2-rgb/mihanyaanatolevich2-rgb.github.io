@@ -19,9 +19,21 @@ type CallSignalRow = {
   sender_id: string;
   receiver_id: string;
   signal_type: string;
-  signal_data: RTCSessionDescriptionInit | { candidate?: RTCIceCandidateInit } | Record<string, never>;
+  signal_data: unknown;
   call_id?: string;
   created_at?: string;
+};
+
+const isSessionDescription = (data: unknown): data is RTCSessionDescriptionInit => {
+  if (!data || typeof data !== 'object') return false;
+  const type = (data as { type?: unknown }).type;
+  return type === 'offer' || type === 'answer' || type === 'pranswer' || type === 'rollback';
+};
+
+const getSignalCandidate = (data: unknown): RTCIceCandidateInit | null => {
+  if (!data || typeof data !== 'object') return null;
+  const candidate = (data as { candidate?: unknown }).candidate;
+  return candidate && typeof candidate === 'object' ? candidate as RTCIceCandidateInit : null;
 };
 
 const ICE_SERVERS: RTCConfiguration = {
