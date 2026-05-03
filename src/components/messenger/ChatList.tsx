@@ -174,7 +174,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         const { data, error } = await supabase.functions.invoke('weather', {
           body: { city: weatherCity },
         });
-        if (error || !data?.temp) throw error || new Error('No weather');
+        if (error || typeof data?.temp !== 'number') throw error || new Error('No weather');
         setWeatherData(data as WeatherData);
       } catch {
         setWeatherData({ temp: 0, description: 'Откройте прогноз', icon: '🌤️', city: weatherCity });
