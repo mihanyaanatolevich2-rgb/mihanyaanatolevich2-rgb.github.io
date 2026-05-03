@@ -10,17 +10,16 @@ interface VideoCallProps {
   partnerName: string;
   isVideo: boolean;
   isCaller: boolean;
+  callId?: string | null;
   onEnd: () => void;
 }
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
+    { urls: 'stun:openrelay.metered.ca:80' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    // Free TURN servers for cross-network
     {
       urls: 'turn:openrelay.metered.ca:80',
       username: 'openrelayproject',
@@ -41,17 +40,12 @@ const ICE_SERVERS: RTCConfiguration = {
       username: 'openrelayproject',
       credential: 'openrelayproject',
     },
-    // Backup free TURN
-    {
-      urls: 'turn:relay1.expressturn.com:3478',
-      username: 'efPKVNXHZF5W0MHEPJ',
-      credential: 'aZ67r2OazE7ySsts',
-    },
   ],
   iceCandidatePoolSize: 10,
+  bundlePolicy: 'max-bundle',
 };
 
-const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, onEnd }: VideoCallProps) => {
+const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, callId, onEnd }: VideoCallProps) => {
   const { user } = useAuth();
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideo);
@@ -65,6 +59,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const endedRef = useRef(false);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const remoteDescSetRef = useRef(false);
+  const callIdRef = useRef(callId || crypto.randomUUID());
 
   const sendSignal = useCallback(async (type: string, data: object) => {
     if (!user) return;
@@ -73,8 +68,9 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       sender_id: user.id,
       receiver_id: partnerId,
       signal_type: type,
+      call_id: callIdRef.current,
       signal_data: data as any,
-    });
+    } as any);
   }, [user, conversationId, partnerId]);
 
   const cleanup = useCallback(() => {
