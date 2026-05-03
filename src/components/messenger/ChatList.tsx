@@ -607,8 +607,15 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">{weatherData.icon}</span>
                   <div>
-                    <p className="text-sm font-medium text-foreground">{weatherData.temp}°C</p>
-                    <p className="text-[10px] text-muted-foreground leading-tight">{weatherData.description}</p>
+                    <p className="text-sm font-medium text-foreground">{weatherData.temp === 0 && weatherData.description === 'Откройте прогноз' ? '—' : `${weatherData.temp}°C`}</p>
+                    <a
+                      href={`https://global-weather-world.lovable.app/?city=${encodeURIComponent(weatherCity)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] text-muted-foreground leading-tight hover:text-primary transition-colors"
+                    >
+                      {weatherData.description}
+                    </a>
                   </div>
                 </div>
                 {editingCity ? (
@@ -629,7 +636,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                     className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
                   >
                     <MapPin className="h-3 w-3" />
-                    {weatherCity}
+                    {weatherData.city || weatherCity}
                   </button>
                 )}
               </div>
