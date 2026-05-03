@@ -14,6 +14,16 @@ interface VideoCallProps {
   onEnd: () => void;
 }
 
+type CallSignalRow = {
+  conversation_id: string;
+  sender_id: string;
+  receiver_id: string;
+  signal_type: string;
+  signal_data: RTCSessionDescriptionInit | { candidate?: RTCIceCandidateInit } | Record<string, never>;
+  call_id?: string;
+  created_at?: string;
+};
+
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:openrelay.metered.ca:80' },
@@ -69,8 +79,8 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       receiver_id: partnerId,
       signal_type: type,
       call_id: callIdRef.current,
-      signal_data: data as any,
-    } as any);
+      signal_data: data,
+    } as never);
   }, [user, conversationId, partnerId]);
 
   const cleanup = useCallback(() => {
