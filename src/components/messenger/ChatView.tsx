@@ -70,7 +70,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [uploading, setUploading] = useState(false);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
   const [isCaller, setIsCaller] = useState(false);
-  const [incomingCall, setIncomingCall] = useState<{ type: 'audio' | 'video' } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ type: 'audio' | 'video'; callId: string } | null>(null);
+  const [activeCallId, setActiveCallId] = useState<string | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editText, setEditText] = useState('');
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -422,7 +423,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         if (signal.conversation_id !== conversationId) return;
         if (signal.signal_type === 'offer' && !callType) {
           const isVideoCall = signal.signal_data?.isVideo || false;
-          setIncomingCall({ type: isVideoCall ? 'video' : 'audio' });
+          setIncomingCall({ type: isVideoCall ? 'video' : 'audio', callId: signal.call_id });
         }
       })
       .subscribe();
@@ -782,18 +783,30 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   };
 
   const startCall = (type: 'audio' | 'video') => {
+    setActiveCallId(crypto.randomUUID());
     setIsCaller(true);
     setCallType(type);
   };
 
   const acceptCall = () => {
     if (!incomingCall) return;
+    setActiveCallId(incomingCall.callId);
     setIsCaller(false);
     setCallType(incomingCall.type);
     setIncomingCall(null);
   };
 
-  const rejectCall = () => {
+  const rejectCall = async () => {
+    if (incomingCall && user && partnerId) {
+      await supabase.from('call_signals').insert({
+        conversation_id: conversationId,
+        sender_id: user.id,
+        receiver_id: partnerId,
+        signal_type: 'hang-up',
+        call_id: incomingCall.callId,
+        signal_data: {},
+      } as any);
+    }
     setIncomingCall(null);
   };
 
@@ -805,7 +818,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         partnerName={displayName}
         isVideo={callType === 'video'}
         isCaller={isCaller}
-        onEnd={() => { setCallType(null); setIsCaller(false); }}
+        callId={activeCallId}
+        onEnd={() => { setCallType(null); setIsCaller(false); setActiveCallId(null); }}
       />
     );
   }
