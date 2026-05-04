@@ -202,6 +202,20 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     if (data) setPinnedMessages(data as PinnedMessage[]);
   };
 
+  const loadComments = async () => {
+    const { data } = await (supabase.from as any)('channel_comments')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    const map = new Map<string, ChannelComment[]>();
+    for (const comment of (data || []) as ChannelComment[]) {
+      const arr = map.get(comment.message_id) || [];
+      arr.push(comment);
+      map.set(comment.message_id, arr);
+    }
+    setCommentsByMessage(map);
+  };
+
   // Load conversation info
   useEffect(() => {
     const loadConvInfo = async () => {
@@ -287,6 +301,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     };
     loadConvInfo();
     loadPinnedMessages();
+    loadComments();
   }, [conversationId, user]);
 
   // Realtime partner last_seen
