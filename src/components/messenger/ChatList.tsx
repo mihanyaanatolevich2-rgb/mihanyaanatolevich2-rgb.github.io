@@ -590,9 +590,15 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
         <h2 className="text-lg font-semibold text-foreground">Чаты</h2>
+        <p className="absolute left-1/2 -translate-x-1/2 text-xs font-medium text-muted-foreground whitespace-nowrap">
+          {getGreeting()}
+        </p>
         <div className="flex gap-1">
           <Button variant="ghost" size="icon" onClick={() => setShowSettings(true)} className="text-muted-foreground hover:text-primary">
             <Settings className="h-5 w-5" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => setShowNewChannel(true)} className="text-muted-foreground hover:text-primary">
+            <Megaphone className="h-5 w-5" />
           </Button>
           <Button variant="ghost" size="icon" onClick={() => setShowNewGroup(true)} className="text-muted-foreground hover:text-primary">
             <Users className="h-5 w-5" />
@@ -682,7 +688,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 <Avatar className="h-10 w-10 shrink-0">
                   {chat.participantAvatarUrl && <AvatarImage src={chat.participantAvatarUrl} />}
                   <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
-                    {chat.isSavedMessages ? '⭐' : chat.isGroup ? '👥' : chat.participantName.charAt(0).toUpperCase()}
+                    {chat.isSavedMessages ? '⭐' : chat.isChannel ? '📣' : chat.isGroup ? '👥' : chat.participantName.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1 text-left">
@@ -717,6 +723,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
 
       <NewChatDialog open={showNewChat} onOpenChange={setShowNewChat} onChatCreated={(id) => { handleSelectChat(id); loadChats(); }} />
       <NewGroupDialog open={showNewGroup} onOpenChange={setShowNewGroup} onGroupCreated={(id) => { handleSelectChat(id); loadChats(); }} />
+      <NewChannelDialog open={showNewChannel} onOpenChange={setShowNewChannel} onChannelCreated={(id) => { handleSelectChat(id); loadChats(); }} />
 
       {/* Rename dialog */}
       <Dialog open={renameDialog.open} onOpenChange={(o) => setRenameDialog(prev => ({ ...prev, open: o }))}>
