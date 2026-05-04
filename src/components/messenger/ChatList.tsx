@@ -588,7 +588,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   return (
     <div className="flex h-full flex-col bg-sidebar">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
+      <div className="relative flex items-center justify-between border-b border-sidebar-border px-4 py-3">
         <h2 className="text-lg font-semibold text-foreground">Чаты</h2>
         <p className="absolute left-1/2 -translate-x-1/2 text-xs font-medium text-muted-foreground whitespace-nowrap">
           {getGreeting()}
