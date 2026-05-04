@@ -588,12 +588,12 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   return (
     <div className="flex h-full flex-col bg-sidebar">
       {/* Header */}
-      <div className="relative flex items-center justify-between border-b border-sidebar-border px-4 py-3">
-        <h2 className="text-lg font-semibold text-foreground">Чаты</h2>
-        <p className="absolute left-1/2 -translate-x-1/2 text-xs font-medium text-muted-foreground whitespace-nowrap">
+      <div className="flex items-center gap-2 border-b border-sidebar-border px-4 py-3">
+        <h2 className="shrink-0 text-lg font-semibold text-foreground">Чаты</h2>
+        <p className="min-w-0 flex-1 text-center text-xs font-medium text-muted-foreground truncate">
           {getGreeting()}
         </p>
-        <div className="flex gap-1">
+        <div className="flex shrink-0 gap-1">
           <Button variant="ghost" size="icon" onClick={() => setShowSettings(true)} className="text-muted-foreground hover:text-primary">
             <Settings className="h-5 w-5" />
           </Button>
