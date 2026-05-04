@@ -745,6 +745,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     const repliedMsg = getReplyMessage(msg.reply_to_id);
     const showDateSep = needsDateSeparator(index);
     const pinned = isPinned(msg.id);
+    const comments = commentsByMessage.get(msg.id) || [];
+    const commentsOpen = openComments.has(msg.id);
 
     return (
       <div key={msg.id}>
@@ -824,9 +826,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent className="bg-popover border-border">
-            <ContextMenuItem onClick={() => startReply(msg)} className="gap-2">
-              <Reply className="h-4 w-4" /> Ответить
-            </ContextMenuItem>
+            {!isChannel && (
+              <ContextMenuItem onClick={() => startReply(msg)} className="gap-2">
+                <Reply className="h-4 w-4" /> Ответить
+              </ContextMenuItem>
+            )}
             {msg.message_type === 'text' && msg.content && (
               <ContextMenuItem onClick={async () => {
                 try { await navigator.clipboard.writeText(msg.content!); toast.success('Скопировано'); } catch { toast.error('Ошибка'); }
@@ -868,6 +872,47 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             )}
           </ContextMenuContent>
         </ContextMenu>
+        {isChannel && (
+          <div className={`mt-1 flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+            <div className="w-[min(75%,28rem)] rounded-xl bg-secondary/45 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => setOpenComments(prev => {
+                  const next = new Set(prev);
+                  if (next.has(msg.id)) next.delete(msg.id);
+                  else next.add(msg.id);
+                  return next;
+                })}
+                className="flex w-full items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
+                <MessageCircle className="h-3.5 w-3.5" />
+                {comments.length ? `${comments.length} комментариев` : 'Комментировать'}
+              </button>
+              {commentsOpen && (
+                <div className="mt-2 space-y-2">
+                  {comments.map(comment => (
+                    <div key={comment.id} className="rounded-lg bg-background/60 px-2 py-1.5">
+                      <p className="text-[11px] font-medium text-primary">{getSenderName(comment.user_id)}</p>
+                      <p className="text-xs text-foreground whitespace-pre-wrap break-words">{comment.content}</p>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={commentInputs[msg.id] || ''}
+                      onChange={(e) => setCommentInputs(prev => ({ ...prev, [msg.id]: e.target.value }))}
+                      onKeyDown={(e) => e.key === 'Enter' && sendComment(msg.id)}
+                      placeholder="Комментарий..."
+                      className="min-w-0 flex-1 rounded-lg bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <Button type="button" size="icon" className="h-7 w-7 shrink-0" disabled={!commentInputs[msg.id]?.trim()} onClick={() => sendComment(msg.id)}>
+                      <Send className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
