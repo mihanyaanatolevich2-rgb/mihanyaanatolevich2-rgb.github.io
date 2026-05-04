@@ -55,6 +55,36 @@ export type Database = {
           },
         ]
       }
+      channel_comments: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          message_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          message_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          message_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       contact_nicknames: {
         Row: {
           contact_user_id: string
@@ -114,27 +144,33 @@ export type Database = {
       conversations: {
         Row: {
           avatar_url: string | null
+          channel_visibility: string | null
           created_at: string
           created_by: string | null
           id: string
+          is_channel: boolean
           is_group: boolean
           name: string | null
           updated_at: string
         }
         Insert: {
           avatar_url?: string | null
+          channel_visibility?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
+          is_channel?: boolean
           is_group?: boolean
           name?: string | null
           updated_at?: string
         }
         Update: {
           avatar_url?: string | null
+          channel_visibility?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
+          is_channel?: boolean
           is_group?: boolean
           name?: string | null
           updated_at?: string
@@ -460,6 +496,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_post_in_conversation: {
+        Args: { _conversation_id: string; _user_id: string }
+        Returns: boolean
+      }
+      create_channel_conversation: {
+        Args: {
+          channel_name: string
+          channel_visibility: string
+          member_ids?: string[]
+        }
+        Returns: string
+      }
       create_group_conversation: {
         Args: { group_name: string; member_ids: string[] }
         Returns: string
@@ -473,6 +521,7 @@ export type Database = {
         Args: { _conversation_id: string; _user_id: string }
         Returns: boolean
       }
+      join_public_channel: { Args: { channel_id: string }; Returns: string }
       search_profiles: {
         Args: { search_term: string }
         Returns: {
@@ -480,6 +529,16 @@ export type Database = {
           display_name: string
           user_id: string
           username: string
+        }[]
+      }
+      search_public_channels: {
+        Args: { search_term?: string }
+        Returns: {
+          avatar_url: string
+          created_at: string
+          id: string
+          members_count: number
+          name: string
         }[]
       }
       update_last_seen: { Args: never; Returns: undefined }

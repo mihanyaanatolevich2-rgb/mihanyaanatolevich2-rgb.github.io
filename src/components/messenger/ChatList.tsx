@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon, Camera, Palette, ChevronDown, ChevronUp, CloudSun, Bookmark, Clock, MapPin } from 'lucide-react';
+import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon, Camera, Palette, ChevronDown, ChevronUp, CloudSun, Bookmark, Clock, MapPin, Megaphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -10,6 +10,7 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import NewChatDialog from './NewChatDialog';
 import NewGroupDialog from './NewGroupDialog';
+import NewChannelDialog from './NewChannelDialog';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -33,6 +34,7 @@ interface ChatItem {
   lastMessage?: string;
   lastMessageAt?: string;
   isGroup?: boolean;
+  isChannel?: boolean;
   isSavedMessages?: boolean;
   unreadCount: number;
 }
@@ -77,6 +79,7 @@ interface WeatherData {
   description: string;
   icon: string;
   city?: string;
+  forecastUrl?: string;
 }
 
 const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
@@ -84,6 +87,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
+  const [showNewChannel, setShowNewChannel] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [search, setSearch] = useState('');
   const [renameDialog, setRenameDialog] = useState<{ open: boolean; userId: string; currentName: string }>({ open: false, userId: '', currentName: '' });
@@ -126,6 +130,13 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const [weatherOpen, setWeatherOpen] = useState(() => localStorage.getItem('weather-open') !== 'false');
   const [editingCity, setEditingCity] = useState(false);
   const [cityInput, setCityInput] = useState('');
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'Доброе утро!';
+    if (hour >= 12 && hour < 18) return 'Добрый день!';
+    return 'Добрый вечер!';
+  };
 
   // Digital Detox
   const [detoxSeconds, setDetoxSeconds] = useState(0);
@@ -177,7 +188,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         if (error || typeof data?.temp !== 'number') throw error || new Error('No weather');
         setWeatherData(data as WeatherData);
       } catch {
-        setWeatherData({ temp: 0, description: 'Откройте прогноз', icon: '🌤️', city: weatherCity });
+        setWeatherData({ temp: NaN, description: 'Смотреть прогноз', icon: '🌤️', city: weatherCity });
       }
     };
     fetchWeather();
@@ -405,7 +416,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const lastReadMap = new Map(myParts.map(p => [p.conversation_id, p.last_read_at]));
 
     const [convRes, allPartsRes, nicknamesRes, messagesRes] = await Promise.all([
-      supabase.from('conversations').select('id, name, is_group, avatar_url').in('id', convIds),
+      supabase.from('conversations').select('id, name, is_group, is_channel, avatar_url').in('id', convIds),
       supabase.from('conversation_participants').select('conversation_id, user_id').in('conversation_id', convIds),
       supabase.from('contact_nicknames').select('contact_user_id, nickname').eq('user_id', user.id),
       supabase.from('messages').select('conversation_id, content, created_at, message_type, sender_id')
@@ -413,7 +424,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         .order('created_at', { ascending: false }),
     ]);
 
-    const conversations = convRes.data || [];
+    const conversations = (convRes.data || []) as any[];
     const allParts = allPartsRes.data || [];
     const nicknameMap = new Map(nicknamesRes.data?.map(n => [n.contact_user_id, n.nickname]) || []);
 
@@ -453,11 +464,12 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
       }
     }
 
-    const convMap = new Map(conversations.map(c => [c.id, c]));
+    const convMap = new Map<string, any>(conversations.map(c => [c.id, c]));
 
     const chatItems: ChatItem[] = convIds.map(convId => {
       const conv = convMap.get(convId);
       const isGroup = conv?.is_group || false;
+      const isChannel = (conv as any)?.is_channel || false;
       const isSaved = convId === savedConvId;
       let name = 'Unknown';
       let email = '';
@@ -466,6 +478,9 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
 
       if (isSaved) {
         name = '⭐ Избранное';
+      } else if (isChannel) {
+        name = conv?.name || 'Канал';
+        avatarUrl = (conv as any)?.avatar_url || null;
       } else if (isGroup) {
         name = conv?.name || 'Группа';
         avatarUrl = (conv as any)?.avatar_url || null;
@@ -497,6 +512,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         lastMessage,
         lastMessageAt: lastMsg?.created_at,
         isGroup,
+        isChannel,
         isSavedMessages: isSaved,
         unreadCount: unreadMap.get(convId) || 0,
       };
@@ -573,11 +589,17 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   return (
     <div className="flex h-full flex-col bg-sidebar">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-sidebar-border px-4 py-3">
-        <h2 className="text-lg font-semibold text-foreground">Чаты</h2>
-        <div className="flex gap-1">
+      <div className="flex items-center gap-2 border-b border-sidebar-border px-4 py-3">
+        <h2 className="shrink-0 text-lg font-semibold text-foreground">Чаты</h2>
+        <p className="min-w-0 flex-1 text-center text-xs font-medium text-muted-foreground truncate">
+          {getGreeting()}
+        </p>
+        <div className="flex shrink-0 gap-1">
           <Button variant="ghost" size="icon" onClick={() => setShowSettings(true)} className="text-muted-foreground hover:text-primary">
             <Settings className="h-5 w-5" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => setShowNewChannel(true)} className="text-muted-foreground hover:text-primary">
+            <Megaphone className="h-5 w-5" />
           </Button>
           <Button variant="ghost" size="icon" onClick={() => setShowNewGroup(true)} className="text-muted-foreground hover:text-primary">
             <Users className="h-5 w-5" />
@@ -607,9 +629,9 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">{weatherData.icon}</span>
                   <div>
-                    <p className="text-sm font-medium text-foreground">{weatherData.temp === 0 && weatherData.description === 'Откройте прогноз' ? '—' : `${weatherData.temp}°C`}</p>
+                    <p className="text-sm font-medium text-foreground">{Number.isFinite(weatherData.temp) ? `${weatherData.temp}°C` : 'Прогноз'}</p>
                     <a
-                      href={`https://global-weather-world.lovable.app/?city=${encodeURIComponent(weatherCity)}`}
+                      href={weatherData.forecastUrl || `https://global-weather-world.lovable.app/?city=${encodeURIComponent(weatherCity)}`}
                       target="_blank"
                       rel="noreferrer"
                       className="text-[10px] text-muted-foreground leading-tight hover:text-primary transition-colors"
@@ -667,7 +689,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 <Avatar className="h-10 w-10 shrink-0">
                   {chat.participantAvatarUrl && <AvatarImage src={chat.participantAvatarUrl} />}
                   <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
-                    {chat.isSavedMessages ? '⭐' : chat.isGroup ? '👥' : chat.participantName.charAt(0).toUpperCase()}
+                    {chat.isSavedMessages ? '⭐' : chat.isChannel ? '📣' : chat.isGroup ? '👥' : chat.participantName.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1 text-left">
@@ -702,6 +724,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
 
       <NewChatDialog open={showNewChat} onOpenChange={setShowNewChat} onChatCreated={(id) => { handleSelectChat(id); loadChats(); }} />
       <NewGroupDialog open={showNewGroup} onOpenChange={setShowNewGroup} onGroupCreated={(id) => { handleSelectChat(id); loadChats(); }} />
+      <NewChannelDialog open={showNewChannel} onOpenChange={setShowNewChannel} onChannelCreated={(id) => { handleSelectChat(id); loadChats(); }} />
 
       {/* Rename dialog */}
       <Dialog open={renameDialog.open} onOpenChange={(o) => setRenameDialog(prev => ({ ...prev, open: o }))}>

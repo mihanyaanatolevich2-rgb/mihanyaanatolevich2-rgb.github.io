@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy, Pin, PinOff } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy, Pin, PinOff, MessageCircle, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
@@ -40,6 +40,15 @@ interface PinnedMessage {
   pinned_by: string;
 }
 
+interface ChannelComment {
+  id: string;
+  message_id: string;
+  conversation_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+}
+
 interface ChatViewProps {
   conversationId: string;
   onBack: () => void;
@@ -65,6 +74,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
   const [isGroup, setIsGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [isChannel, setIsChannel] = useState(false);
+  const [channelVisibility, setChannelVisibility] = useState<'public' | 'private' | null>(null);
+  const [canPostInChannel, setCanPostInChannel] = useState(true);
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -84,6 +96,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
+  const [commentsByMessage, setCommentsByMessage] = useState<Map<string, ChannelComment[]>>(new Map());
+  const [openComments, setOpenComments] = useState<Set<string>>(new Set());
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [wallpaperStyle, setWallpaperStyle] = useState<React.CSSProperties>({});
   const [isExiting, setIsExiting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -187,20 +202,43 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     if (data) setPinnedMessages(data as PinnedMessage[]);
   };
 
+  const loadComments = async () => {
+    const { data } = await (supabase.from as any)('channel_comments')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    const map = new Map<string, ChannelComment[]>();
+    for (const comment of (data || []) as ChannelComment[]) {
+      const arr = map.get(comment.message_id) || [];
+      arr.push(comment);
+      map.set(comment.message_id, arr);
+    }
+    setCommentsByMessage(map);
+  };
+
   // Load conversation info
   useEffect(() => {
     const loadConvInfo = async () => {
       if (!user) return;
 
-      const { data: conv } = await supabase
-        .from('conversations')
-        .select('name, is_group, avatar_url')
+      const { data: conv } = await (supabase.from as any)('conversations')
+        .select('name, is_group, is_channel, channel_visibility, avatar_url, created_by')
         .eq('id', conversationId)
         .single();
 
+      const channel = Boolean((conv as any)?.is_channel);
+      setIsChannel(channel);
+      setChannelVisibility(((conv as any)?.channel_visibility || null) as 'public' | 'private' | null);
+
+      if (channel) {
+        setCanPostInChannel((conv as any)?.created_by === user.id);
+      } else {
+        setCanPostInChannel(true);
+      }
+
       if (conv?.is_group) {
         setIsGroup(true);
-        setGroupName(conv.name || 'Группа');
+        setGroupName(conv.name || (channel ? 'Канал' : 'Группа'));
         setGroupAvatarUrl((conv as any).avatar_url || null);
         const { data: parts } = await supabase
           .from('conversation_participants')
@@ -227,6 +265,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       }
 
       setIsGroup(false);
+      setGroupName('');
+      setGroupAvatarUrl(null);
       const { data } = await supabase
         .from('conversation_participants')
         .select('user_id')
@@ -255,6 +295,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     };
     loadConvInfo();
     loadPinnedMessages();
+    loadComments();
   }, [conversationId, user]);
 
   // Realtime partner last_seen
@@ -386,6 +427,22 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return () => { supabase.removeChannel(channel); };
   }, [conversationId]);
 
+  // Realtime channel comments
+  useEffect(() => {
+    const channel = supabase
+      .channel(`channel-comments-${conversationId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'channel_comments',
+        filter: `conversation_id=eq.${conversationId}`,
+      }, () => {
+        loadComments();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [conversationId]);
+
   // Realtime: conversation name/avatar updates
   useEffect(() => {
     if (!conversationId) return;
@@ -439,6 +496,10 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || !user) return;
+    if (isChannel && !canPostInChannel) {
+      toast.error('В канале публиковать может только создатель или админ');
+      return;
+    }
 
     const content = input.trim();
     setInput('');
@@ -476,6 +537,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0 || !user) return;
+    if (isChannel && !canPostInChannel) {
+      toast.error('В канале публиковать может только создатель или админ');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
 
     setUploading(true);
 
@@ -559,6 +625,24 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   };
 
   const cancelReply = () => { setReplyTo(null); };
+
+  const sendComment = async (messageId: string) => {
+    const text = (commentInputs[messageId] || '').trim();
+    if (!text || !user) return;
+    const { error } = await (supabase.from as any)('channel_comments').insert({
+      message_id: messageId,
+      conversation_id: conversationId,
+      user_id: user.id,
+      content: text,
+    });
+    if (error) {
+      toast.error('Комментарий не отправлен');
+      return;
+    }
+    setCommentInputs(prev => ({ ...prev, [messageId]: '' }));
+    setOpenComments(prev => new Set([...prev, messageId]));
+    loadComments();
+  };
 
   const downloadFile = async (url: string, filename: string) => {
     try {
@@ -655,6 +739,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     const repliedMsg = getReplyMessage(msg.reply_to_id);
     const showDateSep = needsDateSeparator(index);
     const pinned = isPinned(msg.id);
+    const comments = commentsByMessage.get(msg.id) || [];
+    const commentsOpen = openComments.has(msg.id);
 
     return (
       <div key={msg.id}>
@@ -734,9 +820,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent className="bg-popover border-border">
-            <ContextMenuItem onClick={() => startReply(msg)} className="gap-2">
-              <Reply className="h-4 w-4" /> Ответить
-            </ContextMenuItem>
+            {!isChannel && (
+              <ContextMenuItem onClick={() => startReply(msg)} className="gap-2">
+                <Reply className="h-4 w-4" /> Ответить
+              </ContextMenuItem>
+            )}
             {msg.message_type === 'text' && msg.content && (
               <ContextMenuItem onClick={async () => {
                 try { await navigator.clipboard.writeText(msg.content!); toast.success('Скопировано'); } catch { toast.error('Ошибка'); }
@@ -778,6 +866,47 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
             )}
           </ContextMenuContent>
         </ContextMenu>
+        {isChannel && (
+          <div className={`mt-1 flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+            <div className="w-[min(75%,28rem)] rounded-xl bg-secondary/45 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => setOpenComments(prev => {
+                  const next = new Set(prev);
+                  if (next.has(msg.id)) next.delete(msg.id);
+                  else next.add(msg.id);
+                  return next;
+                })}
+                className="flex w-full items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
+                <MessageCircle className="h-3.5 w-3.5" />
+                {comments.length ? `${comments.length} комментариев` : 'Комментировать'}
+              </button>
+              {commentsOpen && (
+                <div className="mt-2 space-y-2">
+                  {comments.map(comment => (
+                    <div key={comment.id} className="rounded-lg bg-background/60 px-2 py-1.5">
+                      <p className="text-[11px] font-medium text-primary">{getSenderName(comment.user_id)}</p>
+                      <p className="text-xs text-foreground whitespace-pre-wrap break-words">{comment.content}</p>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={commentInputs[msg.id] || ''}
+                      onChange={(e) => setCommentInputs(prev => ({ ...prev, [msg.id]: e.target.value }))}
+                      onKeyDown={(e) => e.key === 'Enter' && sendComment(msg.id)}
+                      placeholder="Комментарий..."
+                      className="min-w-0 flex-1 rounded-lg bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <Button type="button" size="icon" className="h-7 w-7 shrink-0" disabled={!commentInputs[msg.id]?.trim()} onClick={() => sendComment(msg.id)}>
+                      <Send className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
