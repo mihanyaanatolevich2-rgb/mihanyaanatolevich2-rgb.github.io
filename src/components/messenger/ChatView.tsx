@@ -433,6 +433,22 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return () => { supabase.removeChannel(channel); };
   }, [conversationId]);
 
+  // Realtime channel comments
+  useEffect(() => {
+    const channel = supabase
+      .channel(`channel-comments-${conversationId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'channel_comments',
+        filter: `conversation_id=eq.${conversationId}`,
+      }, () => {
+        loadComments();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [conversationId]);
+
   // Realtime: conversation name/avatar updates
   useEffect(() => {
     if (!conversationId) return;
