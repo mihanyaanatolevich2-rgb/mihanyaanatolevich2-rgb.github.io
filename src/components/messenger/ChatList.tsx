@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon, Camera, Palette, ChevronDown, ChevronUp, CloudSun, Bookmark, Clock, MapPin } from 'lucide-react';
+import { Plus, LogOut, Search, Users, Edit2, Trash2, Settings, Minus as ZoomOut, Plus as ZoomIn, Sun, Moon, Camera, Palette, ChevronDown, ChevronUp, CloudSun, Bookmark, Clock, MapPin, Megaphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -10,6 +10,7 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import NewChatDialog from './NewChatDialog';
 import NewGroupDialog from './NewGroupDialog';
+import NewChannelDialog from './NewChannelDialog';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -33,6 +34,7 @@ interface ChatItem {
   lastMessage?: string;
   lastMessageAt?: string;
   isGroup?: boolean;
+  isChannel?: boolean;
   isSavedMessages?: boolean;
   unreadCount: number;
 }
@@ -84,6 +86,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
+  const [showNewChannel, setShowNewChannel] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [search, setSearch] = useState('');
   const [renameDialog, setRenameDialog] = useState<{ open: boolean; userId: string; currentName: string }>({ open: false, userId: '', currentName: '' });
