@@ -221,8 +221,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     const loadConvInfo = async () => {
       if (!user) return;
 
-      const { data: conv } = await supabase
-        .from('conversations')
+      const { data: conv } = await (supabase.from as any)('conversations')
         .select('name, is_group, is_channel, channel_visibility, avatar_url, created_by')
         .eq('id', conversationId)
         .single();
