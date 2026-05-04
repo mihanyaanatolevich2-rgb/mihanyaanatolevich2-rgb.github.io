@@ -8,6 +8,7 @@ type WeatherResult = {
   description: string;
   icon: string;
   city: string;
+  forecastUrl: string;
 };
 
 const RU_CITY_COORDS: Record<string, { name: string; latitude: number; longitude: number }> = {
@@ -86,6 +87,38 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
+async function fetchOpenMeteo(place: { name: string; latitude: number; longitude: number }): Promise<WeatherResult | null> {
+  const weather = await fetchJson<{ current?: { temperature_2m: number; weather_code: number; is_day: number } }>(
+    `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code,is_day&timezone=auto`,
+  );
+  const current = weather?.current;
+  if (!current) return null;
+  const code = Number(current.weather_code);
+  return {
+    temp: Math.round(Number(current.temperature_2m)),
+    description: describeWmo(code),
+    icon: getWeatherEmoji(code, Number(current.is_day) === 1),
+    city: place.name,
+    forecastUrl: `https://global-weather-world.lovable.app/?city=${encodeURIComponent(place.name)}`,
+  };
+}
+
+async function fetchWttr(rawCity: string): Promise<WeatherResult | null> {
+  const data = await fetchJson<{ current_condition?: Array<{ temp_C?: string; weatherDesc?: Array<{ value?: string }>; weatherCode?: string }> }>(
+    `https://wttr.in/${encodeURIComponent(rawCity)}?format=j1&lang=ru`,
+  );
+  const current = data?.current_condition?.[0];
+  if (!current?.temp_C) return null;
+  const code = Number(current.weatherCode || 0);
+  return {
+    temp: Math.round(Number(current.temp_C)),
+    description: current.weatherDesc?.[0]?.value || describeWmo(code),
+    icon: getWeatherEmoji(code),
+    city: rawCity,
+    forecastUrl: `https://global-weather-world.lovable.app/?city=${encodeURIComponent(rawCity)}`,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -116,19 +149,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const weather = await fetchJson<{ current?: { temperature_2m: number; weather_code: number; is_day: number } }>(
-      `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code,is_day&timezone=auto`,
-    );
-    const current = weather?.current;
-    if (!current) throw new Error("Weather unavailable");
-
-    const code = Number(current.weather_code);
-    const result: WeatherResult = {
-      temp: Math.round(Number(current.temperature_2m)),
-      description: describeWmo(code),
-      icon: getWeatherEmoji(code, Number(current.is_day) === 1),
-      city: place.name,
-    };
+    const result = await fetchOpenMeteo(place) || await fetchWttr(rawCity);
+    if (!result) throw new Error("Weather unavailable");
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
