@@ -628,7 +628,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">{weatherData.icon}</span>
                   <div>
-                    <p className="text-sm font-medium text-foreground">{weatherData.temp === 0 && weatherData.description === 'Откройте прогноз' ? '—' : `${weatherData.temp}°C`}</p>
+                    <p className="text-sm font-medium text-foreground">{Number.isFinite(weatherData.temp) ? `${weatherData.temp}°C` : 'Прогноз'}</p>
                     <a
                       href={`https://global-weather-world.lovable.app/?city=${encodeURIComponent(weatherCity)}`}
                       target="_blank"
