@@ -130,6 +130,13 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
   const [editingCity, setEditingCity] = useState(false);
   const [cityInput, setCityInput] = useState('');
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'Доброе утро!';
+    if (hour >= 12 && hour < 18) return 'Добрый день!';
+    return 'Добрый вечер!';
+  };
+
   // Digital Detox
   const [detoxSeconds, setDetoxSeconds] = useState(0);
   const detoxRef = useRef<number>(0);
@@ -180,7 +187,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         if (error || typeof data?.temp !== 'number') throw error || new Error('No weather');
         setWeatherData(data as WeatherData);
       } catch {
-        setWeatherData({ temp: 0, description: 'Откройте прогноз', icon: '🌤️', city: weatherCity });
+        setWeatherData({ temp: NaN, description: 'Смотреть прогноз', icon: '🌤️', city: weatherCity });
       }
     };
     fetchWeather();
@@ -408,7 +415,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const lastReadMap = new Map(myParts.map(p => [p.conversation_id, p.last_read_at]));
 
     const [convRes, allPartsRes, nicknamesRes, messagesRes] = await Promise.all([
-      supabase.from('conversations').select('id, name, is_group, avatar_url').in('id', convIds),
+      supabase.from('conversations').select('id, name, is_group, is_channel, avatar_url').in('id', convIds),
       supabase.from('conversation_participants').select('conversation_id, user_id').in('conversation_id', convIds),
       supabase.from('contact_nicknames').select('contact_user_id, nickname').eq('user_id', user.id),
       supabase.from('messages').select('conversation_id, content, created_at, message_type, sender_id')
@@ -461,6 +468,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const chatItems: ChatItem[] = convIds.map(convId => {
       const conv = convMap.get(convId);
       const isGroup = conv?.is_group || false;
+      const isChannel = (conv as any)?.is_channel || false;
       const isSaved = convId === savedConvId;
       let name = 'Unknown';
       let email = '';
@@ -469,6 +477,9 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
 
       if (isSaved) {
         name = '⭐ Избранное';
+      } else if (isChannel) {
+        name = conv?.name || 'Канал';
+        avatarUrl = (conv as any)?.avatar_url || null;
       } else if (isGroup) {
         name = conv?.name || 'Группа';
         avatarUrl = (conv as any)?.avatar_url || null;
@@ -500,6 +511,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         lastMessage,
         lastMessageAt: lastMsg?.created_at,
         isGroup,
+        isChannel,
         isSavedMessages: isSaved,
         unreadCount: unreadMap.get(convId) || 0,
       };
