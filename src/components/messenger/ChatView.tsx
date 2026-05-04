@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy, Pin, PinOff } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy, Pin, PinOff, MessageCircle, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
@@ -40,6 +40,15 @@ interface PinnedMessage {
   pinned_by: string;
 }
 
+interface ChannelComment {
+  id: string;
+  message_id: string;
+  conversation_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+}
+
 interface ChatViewProps {
   conversationId: string;
   onBack: () => void;
@@ -65,6 +74,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
   const [isGroup, setIsGroup] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [isChannel, setIsChannel] = useState(false);
+  const [channelVisibility, setChannelVisibility] = useState<'public' | 'private' | null>(null);
+  const [canPostInChannel, setCanPostInChannel] = useState(true);
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -84,6 +96,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
+  const [commentsByMessage, setCommentsByMessage] = useState<Map<string, ChannelComment[]>>(new Map());
+  const [openComments, setOpenComments] = useState<Set<string>>(new Set());
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [wallpaperStyle, setWallpaperStyle] = useState<React.CSSProperties>({});
   const [isExiting, setIsExiting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
