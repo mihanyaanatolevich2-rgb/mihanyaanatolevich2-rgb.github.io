@@ -423,7 +423,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         .order('created_at', { ascending: false }),
     ]);
 
-    const conversations = convRes.data || [];
+    const conversations = (convRes.data || []) as any[];
     const allParts = allPartsRes.data || [];
     const nicknameMap = new Map(nicknamesRes.data?.map(n => [n.contact_user_id, n.nickname]) || []);
 
@@ -463,7 +463,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
       }
     }
 
-    const convMap = new Map(conversations.map(c => [c.id, c]));
+    const convMap = new Map<string, any>(conversations.map(c => [c.id, c]));
 
     const chatItems: ChatItem[] = convIds.map(convId => {
       const conv = convMap.get(convId);
