@@ -574,6 +574,9 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     if (selectedChat === convId) onSelectChat('');
     setChats(prev => prev.filter(c => c.id !== convId));
     toast.success('Чат удалён у вас');
+  };
+
+  const saveNickname = async () => {
     if (!nickname.trim()) return;
     const { error } = await supabase.from('contact_nicknames').upsert({
       user_id: user!.id,
