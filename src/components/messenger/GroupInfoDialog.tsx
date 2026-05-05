@@ -319,6 +319,17 @@ const GroupInfoDialog = ({ open, onOpenChange, conversationId }: GroupInfoDialog
                       )}
                     </Button>
                   )}
+                  {isAdmin && !p.is_creator && p.user_id !== user?.id && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:text-destructive"
+                      onClick={() => removeParticipant(p)}
+                      title="Удалить из группы"
+                    >
+                      <UserMinus className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
