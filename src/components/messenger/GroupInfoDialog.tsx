@@ -11,7 +11,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Camera, Check, Pencil, Shield, ShieldOff, Crown } from 'lucide-react';
+import { Camera, Check, Pencil, Shield, ShieldOff, Crown, UserMinus } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface GroupInfoDialogProps {
