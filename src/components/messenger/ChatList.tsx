@@ -41,7 +41,7 @@ interface ChatItem {
 
 interface ChatListProps {
   selectedChat: string | null;
-  onSelectChat: (id: string) => void;
+  onSelectChat: (id: string | null) => void;
 }
 
 const ACCENT_COLORS = [
