@@ -41,7 +41,7 @@ interface ChatItem {
 
 interface ChatListProps {
   selectedChat: string | null;
-  onSelectChat: (id: string) => void;
+  onSelectChat: (id: string | null) => void;
 }
 
 const ACCENT_COLORS = [
@@ -415,14 +415,17 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     const convIds = myParts.map(p => p.conversation_id);
     const lastReadMap = new Map(myParts.map(p => [p.conversation_id, p.last_read_at]));
 
-    const [convRes, allPartsRes, nicknamesRes, messagesRes] = await Promise.all([
+    const [convRes, allPartsRes, nicknamesRes, messagesRes, hiddenRes] = await Promise.all([
       supabase.from('conversations').select('id, name, is_group, is_channel, avatar_url').in('id', convIds),
       supabase.from('conversation_participants').select('conversation_id, user_id').in('conversation_id', convIds),
       supabase.from('contact_nicknames').select('contact_user_id, nickname').eq('user_id', user.id),
       supabase.from('messages').select('conversation_id, content, created_at, message_type, sender_id')
         .in('conversation_id', convIds)
         .order('created_at', { ascending: false }),
+      supabase.from('hidden_conversations').select('conversation_id, hidden_at').eq('user_id', user.id),
     ]);
+
+    const hiddenMap = new Map((hiddenRes.data || []).map((h: any) => [h.conversation_id, h.hidden_at]));
 
     const conversations = (convRes.data || []) as any[];
     const allParts = allPartsRes.data || [];
@@ -516,7 +519,13 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
         isSavedMessages: isSaved,
         unreadCount: unreadMap.get(convId) || 0,
       };
-    }).filter(c => c.participantName !== 'Unknown' || c.isGroup || c.isSavedMessages);
+    }).filter(c => c.participantName !== 'Unknown' || c.isGroup || c.isSavedMessages)
+      .filter(c => {
+        const hiddenAt = hiddenMap.get(c.id);
+        if (!hiddenAt) return true;
+        // re-show if a new message arrived after hiding
+        return c.lastMessageAt && new Date(c.lastMessageAt) > new Date(hiddenAt);
+      });
 
     // Sort: saved messages always first, then by last message
     chatItems.sort((a, b) => {
@@ -554,6 +563,17 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     }
     toast.success('Чат очищен');
     loadChats();
+  };
+
+  const deleteChatForMe = async (convId: string) => {
+    await supabase.from('hidden_conversations').upsert({
+      user_id: user!.id,
+      conversation_id: convId,
+      hidden_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,conversation_id' });
+    if (selectedChat === convId) onSelectChat(null);
+    setChats(prev => prev.filter(c => c.id !== convId));
+    toast.success('Чат удалён у вас');
   };
 
   const saveNickname = async () => {
@@ -712,6 +732,11 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
               <ContextMenuItem onClick={() => clearChat(chat.id)} className="gap-2 text-destructive">
                 <Trash2 className="h-4 w-4" /> Очистить чат
               </ContextMenuItem>
+              {!chat.isSavedMessages && (
+                <ContextMenuItem onClick={() => deleteChatForMe(chat.id)} className="gap-2 text-destructive">
+                  <Trash2 className="h-4 w-4" /> Удалить чат у себя
+                </ContextMenuItem>
+              )}
             </ContextMenuContent>
           </ContextMenu>
         ))}

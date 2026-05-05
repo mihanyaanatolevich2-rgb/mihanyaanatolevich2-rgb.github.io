@@ -11,7 +11,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Camera, Check, Pencil, Shield, ShieldOff, Crown } from 'lucide-react';
+import { Camera, Check, Pencil, Shield, ShieldOff, Crown, UserMinus } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface GroupInfoDialogProps {
@@ -175,6 +175,19 @@ const GroupInfoDialog = ({ open, onOpenChange, conversationId }: GroupInfoDialog
     load();
   };
 
+  const removeParticipant = async (participant: Participant) => {
+    if (!isAdmin || participant.is_creator || participant.user_id === user?.id) return;
+    if (!confirm(`Удалить ${participant.display_name} из группы?`)) return;
+    const { error } = await supabase
+      .from('conversation_participants')
+      .delete()
+      .eq('conversation_id', conversationId)
+      .eq('user_id', participant.user_id);
+    if (error) return toast.error('Не удалось удалить участника');
+    toast.success('Участник удалён');
+    load();
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -304,6 +317,17 @@ const GroupInfoDialog = ({ open, onOpenChange, conversationId }: GroupInfoDialog
                       ) : (
                         <Shield className="h-4 w-4" />
                       )}
+                    </Button>
+                  )}
+                  {isAdmin && !p.is_creator && p.user_id !== user?.id && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:text-destructive"
+                      onClick={() => removeParticipant(p)}
+                      title="Удалить из группы"
+                    >
+                      <UserMinus className="h-4 w-4" />
                     </Button>
                   )}
                 </div>
