@@ -175,6 +175,19 @@ const GroupInfoDialog = ({ open, onOpenChange, conversationId }: GroupInfoDialog
     load();
   };
 
+  const removeParticipant = async (participant: Participant) => {
+    if (!isAdmin || participant.is_creator || participant.user_id === user?.id) return;
+    if (!confirm(`Удалить ${participant.display_name} из группы?`)) return;
+    const { error } = await supabase
+      .from('conversation_participants')
+      .delete()
+      .eq('conversation_id', conversationId)
+      .eq('user_id', participant.user_id);
+    if (error) return toast.error('Не удалось удалить участника');
+    toast.success('Участник удалён');
+    load();
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
