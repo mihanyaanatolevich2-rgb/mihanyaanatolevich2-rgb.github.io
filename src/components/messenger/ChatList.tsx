@@ -565,7 +565,15 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
     loadChats();
   };
 
-  const saveNickname = async () => {
+  const deleteChatForMe = async (convId: string) => {
+    await supabase.from('hidden_conversations').upsert({
+      user_id: user!.id,
+      conversation_id: convId,
+      hidden_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,conversation_id' });
+    if (selectedChat === convId) onSelectChat('');
+    setChats(prev => prev.filter(c => c.id !== convId));
+    toast.success('Чат удалён у вас');
     if (!nickname.trim()) return;
     const { error } = await supabase.from('contact_nicknames').upsert({
       user_id: user!.id,
