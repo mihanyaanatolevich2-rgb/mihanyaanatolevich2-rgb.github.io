@@ -27,7 +27,11 @@ export function usePushSubscription() {
         const registration = await navigator.serviceWorker.register('/sw-push.js');
         await navigator.serviceWorker.ready;
 
-        if (!('Notification' in window) || Notification.permission !== 'granted') return;
+        if (!('Notification' in window)) return;
+        if (Notification.permission === 'default') {
+          try { await Notification.requestPermission(); } catch {}
+        }
+        if (Notification.permission !== 'granted') return;
 
         // Unsubscribe old subscription if exists (in case VAPID key changed)
         const existing = await registration.pushManager.getSubscription();
