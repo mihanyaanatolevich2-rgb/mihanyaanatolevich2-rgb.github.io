@@ -1103,25 +1103,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
               disabled={uploading}
               className="min-w-0 flex-1 rounded-xl bg-secondary px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
             />
-            {input.trim() ? (
-              <Button type="submit" size="icon" className="gradient-primary text-primary-foreground shrink-0 rounded-xl">
-                <Send className="h-4 w-4" />
-              </Button>
-            ) : recordMode === 'voice' ? (
-              <div className="flex items-center gap-1 shrink-0">
-                <Button type="button" variant="ghost" size="icon" onClick={() => setRecordMode('circle')} className="text-muted-foreground hover:text-primary shrink-0" title="Переключить на видеокружок">
-                  <Circle className="h-5 w-5" />
-                </Button>
-                <VoiceRecorder conversationId={conversationId} />
-              </div>
-            ) : (
-              <div className="flex items-center gap-1 shrink-0">
-                <Button type="button" variant="ghost" size="icon" onClick={() => setRecordMode('voice')} className="text-muted-foreground hover:text-primary shrink-0" title="Переключить на голосовое">
-                  <Mic className="h-5 w-5" />
-                </Button>
-                <VideoCircleRecorder conversationId={conversationId} />
-              </div>
-            )}
+            <Button type="submit" size="icon" disabled={!input.trim()} className="gradient-primary text-primary-foreground shrink-0 rounded-xl">
+              <Send className="h-4 w-4" />
+            </Button>
           </form>
         </div>
       )}
