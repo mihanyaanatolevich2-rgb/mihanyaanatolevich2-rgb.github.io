@@ -987,7 +987,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         isVideo={callType === 'video'}
         isCaller={isCaller}
         callId={activeCallId}
-        onEnd={() => { setCallType(null); setIsCaller(false); setActiveCallId(null); }}
+        initialStream={pendingCallStreamRef.current}
+        onEnd={() => { pendingCallStreamRef.current = null; setCallType(null); setIsCaller(false); setActiveCallId(null); }}
       />
     );
   }
