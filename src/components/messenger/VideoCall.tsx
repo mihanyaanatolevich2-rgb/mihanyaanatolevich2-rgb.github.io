@@ -11,6 +11,7 @@ interface VideoCallProps {
   isVideo: boolean;
   isCaller: boolean;
   callId?: string | null;
+  initialStream?: MediaStream | null;
   onEnd: () => void;
 }
 
@@ -38,8 +39,10 @@ const getSignalCandidate = (data: unknown): RTCIceCandidateInit | null => {
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
+    { urls: 'stun:stun.relay.metered.ca:80' },
     { urls: 'stun:openrelay.metered.ca:80' },
     { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.nextcloud.com:443' },
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     {
@@ -65,9 +68,10 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
   iceCandidatePoolSize: 10,
   bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require',
 };
 
-const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, callId, onEnd }: VideoCallProps) => {
+const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, callId, initialStream, onEnd }: VideoCallProps) => {
   const { user } = useAuth();
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideo);
@@ -81,6 +85,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const endedRef = useRef(false);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const remoteDescSetRef = useRef(false);
+  const relayRestartedRef = useRef(false);
   const callIdRef = useRef(callId || crypto.randomUUID());
 
   const sendSignal = useCallback(async (type: string, data: object) => {
@@ -133,6 +138,24 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     }
     pendingCandidatesRef.current = [];
   }, []);
+
+  const fetchMissedIceCandidates = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('call_signals')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .eq('sender_id', partnerId)
+      .eq('receiver_id', user.id)
+      .eq('signal_type', 'ice-candidate')
+      .eq('call_id', callIdRef.current)
+      .order('created_at', { ascending: true });
+
+    for (const signal of (data as unknown as CallSignalRow[] | null) || []) {
+      const candidate = getSignalCandidate(signal.signal_data);
+      if (candidate) await addIceCandidate(candidate);
+    }
+  }, [user, conversationId, partnerId, addIceCandidate]);
 
   const setupPeerConnection = useCallback(async () => {
     if (!user) return null;
