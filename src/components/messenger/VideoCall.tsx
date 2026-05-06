@@ -268,6 +268,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
           await pc.setRemoteDescription(new RTCSessionDescription(answer.signal_data));
           remoteDescSetRef.current = true;
           await flushCandidates();
+          await fetchMissedIceCandidates();
           break;
         }
         await new Promise(r => setTimeout(r, 500));
@@ -276,7 +277,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       console.error('Failed to start call:', err);
       onEnd();
     }
-  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId, isVideo]);
+  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId, isVideo, flushCandidates, fetchMissedIceCandidates]);
 
   const startAsCallee = useCallback(async () => {
     try {
@@ -321,28 +322,12 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       await pc.setLocalDescription(answer);
       await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
 
-      // Get any ICE candidates that arrived before we connected
-      const { data: iceCandidates } = await supabase
-        .from('call_signals')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .eq('receiver_id', user.id)
-        .eq('signal_type', 'ice-candidate')
-        .gt('created_at', offer.created_at);
-
-      if (iceCandidates) {
-        for (const ic of iceCandidates) {
-          try {
-            const candidate = getSignalCandidate(ic.signal_data);
-            if (candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch { /* ignore */ }
-        }
-      }
+      await fetchMissedIceCandidates();
     } catch (err) {
       console.error('Failed to setup call:', err);
       onEnd();
     }
-  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal, flushCandidates]);
+  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal, flushCandidates, fetchMissedIceCandidates]);
 
   // Listen for signals via realtime
   useEffect(() => {
