@@ -175,6 +175,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       setIsVideoOff(true);
     }
     localStreamRef.current = stream;
+    if (isVideo && stream.getVideoTracks().length === 0) setIsVideoOff(true);
     if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
