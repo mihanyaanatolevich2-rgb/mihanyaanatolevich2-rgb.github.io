@@ -348,11 +348,20 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         if (!pc && signal.signal_type !== 'hang-up') return;
 
         try {
-          if (signal.signal_type === 'answer' && pc && isSessionDescription(signal.signal_data)) {
+          if (signal.signal_type === 'offer' && pc && !isCaller && isSessionDescription(signal.signal_data)) {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+            remoteDescSetRef.current = true;
+            await flushCandidates();
+            await fetchMissedIceCandidates();
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
+          } else if (signal.signal_type === 'answer' && pc && isSessionDescription(signal.signal_data)) {
             if (pc.signalingState === 'have-local-offer') {
               await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
               remoteDescSetRef.current = true;
               await flushCandidates();
+              await fetchMissedIceCandidates();
             }
           } else if (signal.signal_type === 'ice-candidate') {
             const candidate = getSignalCandidate(signal.signal_data);
@@ -372,7 +381,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user, conversationId, cleanup, onEnd, addIceCandidate, flushCandidates]);
+  }, [user, conversationId, cleanup, onEnd, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates]);
 
   // Start call
   useEffect(() => {
