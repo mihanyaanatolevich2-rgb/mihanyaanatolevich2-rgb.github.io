@@ -11,6 +11,7 @@ interface VideoCallProps {
   isVideo: boolean;
   isCaller: boolean;
   callId?: string | null;
+  initialStream?: MediaStream | null;
   onEnd: () => void;
 }
 
@@ -38,10 +39,32 @@ const getSignalCandidate = (data: unknown): RTCIceCandidateInit | null => {
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
+    { urls: 'stun:stun.relay.metered.ca:80' },
     { urls: 'stun:openrelay.metered.ca:80' },
     { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.nextcloud.com:443' },
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    {
+      urls: 'turn:global.relay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:global.relay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
     {
       urls: 'turn:openrelay.metered.ca:80',
       username: 'openrelayproject',
@@ -65,9 +88,10 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
   iceCandidatePoolSize: 10,
   bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require',
 };
 
-const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, callId, onEnd }: VideoCallProps) => {
+const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, callId, initialStream, onEnd }: VideoCallProps) => {
   const { user } = useAuth();
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideo);
@@ -81,6 +105,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const endedRef = useRef(false);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const remoteDescSetRef = useRef(false);
+  const relayRestartedRef = useRef(false);
   const callIdRef = useRef(callId || crypto.randomUUID());
 
   const sendSignal = useCallback(async (type: string, data: object) => {
@@ -134,18 +159,43 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     pendingCandidatesRef.current = [];
   }, []);
 
+  const fetchMissedIceCandidates = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('call_signals')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .eq('sender_id', partnerId)
+      .eq('receiver_id', user.id)
+      .eq('signal_type', 'ice-candidate')
+      .eq('call_id', callIdRef.current)
+      .order('created_at', { ascending: true });
+
+    for (const signal of (data as unknown as CallSignalRow[] | null) || []) {
+      const candidate = getSignalCandidate(signal.signal_data);
+      if (candidate) await addIceCandidate(candidate);
+    }
+  }, [user, conversationId, partnerId, addIceCandidate]);
+
   const setupPeerConnection = useCallback(async () => {
     if (!user) return null;
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+      stream = initialStream || await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: isVideo,
+      });
     } catch (error) {
       if (!isVideo) throw error;
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false,
+      });
       setIsVideoOff(true);
     }
     localStreamRef.current = stream;
+    if (isVideo && stream.getVideoTracks().length === 0) setIsVideoOff(true);
     if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -179,12 +229,18 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         }
       }
       if (pc.iceConnectionState === 'disconnected') {
-        // Wait a bit before ending
         setTimeout(() => {
-          if (pcRef.current?.iceConnectionState === 'disconnected') {
-            hangUp();
+          if (pcRef.current?.iceConnectionState === 'disconnected' && !relayRestartedRef.current) {
+            relayRestartedRef.current = true;
+            pc.restartIce();
+            if (isCaller && pc.signalingState === 'stable') {
+              pc.createOffer({ iceRestart: true }).then(async (offer) => {
+                await pc.setLocalDescription(offer);
+                await sendSignal('offer', { sdp: offer.sdp, type: offer.type, isVideo, iceRestart: true });
+              }).catch(() => undefined);
+            }
           }
-        }, 5000);
+        }, 2500);
       }
     };
 
@@ -196,7 +252,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     };
 
     return pc;
-  }, [user, isVideo, sendSignal, hangUp]);
+  }, [user, initialStream, isVideo, sendSignal, isCaller]);
 
   const startAsCaller = useCallback(async () => {
     try {
@@ -233,6 +289,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
           await pc.setRemoteDescription(new RTCSessionDescription(answer.signal_data));
           remoteDescSetRef.current = true;
           await flushCandidates();
+          await fetchMissedIceCandidates();
           break;
         }
         await new Promise(r => setTimeout(r, 500));
@@ -241,7 +298,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       console.error('Failed to start call:', err);
       onEnd();
     }
-  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId, isVideo]);
+  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId, isVideo, flushCandidates, fetchMissedIceCandidates]);
 
   const startAsCallee = useCallback(async () => {
     try {
@@ -286,28 +343,12 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       await pc.setLocalDescription(answer);
       await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
 
-      // Get any ICE candidates that arrived before we connected
-      const { data: iceCandidates } = await supabase
-        .from('call_signals')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .eq('receiver_id', user.id)
-        .eq('signal_type', 'ice-candidate')
-        .gt('created_at', offer.created_at);
-
-      if (iceCandidates) {
-        for (const ic of iceCandidates) {
-          try {
-            const candidate = getSignalCandidate(ic.signal_data);
-            if (candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch { /* ignore */ }
-        }
-      }
+      await fetchMissedIceCandidates();
     } catch (err) {
       console.error('Failed to setup call:', err);
       onEnd();
     }
-  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal, flushCandidates]);
+  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal, flushCandidates, fetchMissedIceCandidates]);
 
   // Listen for signals via realtime
   useEffect(() => {
@@ -328,11 +369,20 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         if (!pc && signal.signal_type !== 'hang-up') return;
 
         try {
-          if (signal.signal_type === 'answer' && pc && isSessionDescription(signal.signal_data)) {
+          if (signal.signal_type === 'offer' && pc && !isCaller && isSessionDescription(signal.signal_data)) {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+            remoteDescSetRef.current = true;
+            await flushCandidates();
+            await fetchMissedIceCandidates();
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
+          } else if (signal.signal_type === 'answer' && pc && isSessionDescription(signal.signal_data)) {
             if (pc.signalingState === 'have-local-offer') {
               await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
               remoteDescSetRef.current = true;
               await flushCandidates();
+              await fetchMissedIceCandidates();
             }
           } else if (signal.signal_type === 'ice-candidate') {
             const candidate = getSignalCandidate(signal.signal_data);
@@ -352,7 +402,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user, conversationId, cleanup, onEnd, addIceCandidate, flushCandidates]);
+  }, [user, conversationId, cleanup, onEnd, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates]);
 
   // Start call
   useEffect(() => {

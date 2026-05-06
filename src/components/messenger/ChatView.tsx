@@ -106,6 +106,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pendingCallStreamRef = useRef<MediaStream | null>(null);
   const [maxCharsPerLine, setMaxCharsPerLine] = useState(() => {
     const saved = localStorage.getItem('msg-max-chars');
     return saved ? Number(saved) : 40;
@@ -920,18 +921,47 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     );
   };
 
-  const startCall = (type: 'audio' | 'video') => {
-    setActiveCallId(crypto.randomUUID());
-    setIsCaller(true);
-    setCallType(type);
+  const getCallStream = async (type: 'audio' | 'video') => {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: type === 'video',
+      });
+    } catch (error) {
+      if (type === 'video') {
+        toast.error('Камера недоступна, включаю аудиозвонок');
+        return navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        });
+      }
+      toast.error('Разрешите доступ к микрофону для звонка');
+      throw error;
+    }
   };
 
-  const acceptCall = () => {
+  const startCall = async (type: 'audio' | 'video') => {
+    try {
+      pendingCallStreamRef.current = await getCallStream(type);
+      setActiveCallId(crypto.randomUUID());
+      setIsCaller(true);
+      setCallType(type);
+    } catch {
+      pendingCallStreamRef.current = null;
+    }
+  };
+
+  const acceptCall = async () => {
     if (!incomingCall) return;
-    setActiveCallId(incomingCall.callId);
-    setIsCaller(false);
-    setCallType(incomingCall.type);
-    setIncomingCall(null);
+    try {
+      pendingCallStreamRef.current = await getCallStream(incomingCall.type);
+      setActiveCallId(incomingCall.callId);
+      setIsCaller(false);
+      setCallType(incomingCall.type);
+      setIncomingCall(null);
+    } catch {
+      pendingCallStreamRef.current = null;
+    }
   };
 
   const rejectCall = async () => {
@@ -957,7 +987,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         isVideo={callType === 'video'}
         isCaller={isCaller}
         callId={activeCallId}
-        onEnd={() => { setCallType(null); setIsCaller(false); setActiveCallId(null); }}
+        initialStream={pendingCallStreamRef.current}
+        onEnd={() => { pendingCallStreamRef.current = null; setCallType(null); setIsCaller(false); setActiveCallId(null); }}
       />
     );
   }
