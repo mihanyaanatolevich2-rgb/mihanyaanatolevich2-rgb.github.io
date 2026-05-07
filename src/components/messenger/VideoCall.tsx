@@ -115,6 +115,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const iceRestartAttemptsRef = useRef(0);
   const audioStatsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastInboundAudioBytesRef = useRef(0);
+  const lastRepairRequestAtRef = useRef(0);
   const callIdRef = useRef(callId || crypto.randomUUID());
 
   const sendSignal = useCallback(async (type: string, data: object) => {
@@ -139,6 +140,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     pendingCandidatesRef.current = [];
     audioStatsTimerRef.current = null;
     lastInboundAudioBytesRef.current = 0;
+    lastRepairRequestAtRef.current = 0;
   }, []);
 
   const hangUp = useCallback(() => {
