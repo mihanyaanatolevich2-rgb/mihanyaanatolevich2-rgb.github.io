@@ -141,6 +141,22 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
 
+  .audio-progress {
+    height: 4px;
+    accent-color: hsl(var(--primary));
+    cursor: pointer;
+  }
+
+  .audio-progress::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 999px;
+    background: hsl(var(--muted-foreground) / 0.28);
+  }
+
+  .audio-progress::-webkit-slider-thumb {
+    margin-top: -5px;
+  }
+
   /* Smooth chat slide-in animation */
   .chat-slide-in {
     animation: chatSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
