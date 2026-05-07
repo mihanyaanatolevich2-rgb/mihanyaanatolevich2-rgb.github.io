@@ -255,26 +255,12 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     pc.oniceconnectionstatechange = () => {
       console.log('ICE state:', pc.iceConnectionState);
       if (pc.iceConnectionState === 'failed') {
-        // Try ICE restart
-        pc.restartIce();
-        if (isCaller && pc.signalingState === 'stable') {
-          pc.createOffer({ iceRestart: true }).then(async (offer) => {
-            await pc.setLocalDescription(offer);
-            await sendSignal('offer', { sdp: offer.sdp, type: offer.type, isVideo });
-          }).catch(() => undefined);
-        }
+        requestConnectionRepair('ice-failed').catch(() => undefined);
       }
       if (pc.iceConnectionState === 'disconnected') {
         setTimeout(() => {
           if (pcRef.current?.iceConnectionState === 'disconnected' && !relayRestartedRef.current) {
-            relayRestartedRef.current = true;
-            pc.restartIce();
-            if (isCaller && pc.signalingState === 'stable') {
-              pc.createOffer({ iceRestart: true }).then(async (offer) => {
-                await pc.setLocalDescription(offer);
-                await sendSignal('offer', { sdp: offer.sdp, type: offer.type, isVideo, iceRestart: true });
-              }).catch(() => undefined);
-            }
+            requestConnectionRepair('ice-disconnected').catch(() => undefined);
           }
         }, 2500);
       }
@@ -284,11 +270,28 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       console.log('Connection state:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setStatus('connected');
+        if (!audioStatsTimerRef.current) {
+          audioStatsTimerRef.current = setInterval(async () => {
+            if (endedRef.current || pcRef.current !== pc || pc.connectionState !== 'connected') return;
+            const stats = await pc.getStats();
+            let inboundBytes = 0;
+            stats.forEach((report) => {
+              if (report.type === 'inbound-rtp' && report.kind === 'audio') inboundBytes += report.bytesReceived || 0;
+            });
+            const hadPrevious = lastInboundAudioBytesRef.current > 0;
+            const isSilent = hadPrevious && inboundBytes <= lastInboundAudioBytesRef.current;
+            lastInboundAudioBytesRef.current = inboundBytes;
+            if (callDuration >= 5 && isSilent && Date.now() - lastRepairRequestAtRef.current > 8000) {
+              lastRepairRequestAtRef.current = Date.now();
+              requestConnectionRepair('no-audio-bytes').catch(() => undefined);
+            }
+          }, 4000);
+        }
       }
     };
 
     return pc;
-  }, [user, initialStream, isVideo, sendSignal, isCaller]);
+  }, [user, initialStream, isVideo, requestConnectionRepair, callDuration]);
 
   const startAsCaller = useCallback(async () => {
     try {
