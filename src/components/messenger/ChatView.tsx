@@ -550,6 +550,8 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
     const uploadOne = async (file: File, idx: number) => {
       const ext = file.name.split('.').pop();
+      const lowerName = file.name.toLowerCase();
+      const audioExtensions = ['.mp3', '.wav', '.ogg', '.oga', '.webm', '.m4a', '.aac', '.flac', '.opus'];
       const path = `${user.id}/${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
       const { error } = await supabase.storage.from('chat-media').upload(path, file);
@@ -559,7 +561,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
       let messageType = 'file';
       if (file.type.startsWith('image/')) messageType = 'image';
-      else if (file.type.startsWith('audio/')) messageType = 'audio';
+      else if (file.type.startsWith('audio/') || audioExtensions.some(audioExt => lowerName.endsWith(audioExt))) messageType = 'audio';
       else if (file.type.startsWith('video/')) messageType = 'video';
 
       return {
