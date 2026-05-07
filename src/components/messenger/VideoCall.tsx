@@ -251,6 +251,8 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     pc.ontrack = (e) => {
       if (remoteVideoRef.current && e.streams[0]) {
         remoteVideoRef.current.srcObject = e.streams[0];
+        remoteVideoRef.current.volume = 1;
+        remoteVideoRef.current.play().catch(() => undefined);
         setStatus('connected');
       }
     };
