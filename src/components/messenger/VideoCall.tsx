@@ -295,7 +295,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     };
 
     return pc;
-  }, [user, initialStream, isVideo, requestConnectionRepair]);
+  }, [user, initialStream, isVideo, sendSignal, requestConnectionRepair]);
 
   const startAsCaller = useCallback(async () => {
     try {
