@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import GroupInfoDialog from './GroupInfoDialog';
+import AudioMessage from './AudioMessage';
 
 interface Message {
   id: string;
@@ -558,6 +559,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
       let messageType = 'file';
       if (file.type.startsWith('image/')) messageType = 'image';
+      else if (file.type.startsWith('audio/')) messageType = 'audio';
       else if (file.type.startsWith('video/')) messageType = 'video';
 
       return {
