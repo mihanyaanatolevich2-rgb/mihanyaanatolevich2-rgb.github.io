@@ -116,6 +116,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const audioStatsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastInboundAudioBytesRef = useRef(0);
   const lastRepairRequestAtRef = useRef(0);
+  const connectedAtRef = useRef(0);
   const callIdRef = useRef(callId || crypto.randomUUID());
 
   const sendSignal = useCallback(async (type: string, data: object) => {
@@ -141,6 +142,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     audioStatsTimerRef.current = null;
     lastInboundAudioBytesRef.current = 0;
     lastRepairRequestAtRef.current = 0;
+    connectedAtRef.current = 0;
   }, []);
 
   const hangUp = useCallback(() => {
@@ -270,6 +272,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       console.log('Connection state:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setStatus('connected');
+        if (!connectedAtRef.current) connectedAtRef.current = Date.now();
         if (!audioStatsTimerRef.current) {
           audioStatsTimerRef.current = setInterval(async () => {
             if (endedRef.current || pcRef.current !== pc || pc.connectionState !== 'connected') return;
@@ -281,7 +284,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
             const hadPrevious = lastInboundAudioBytesRef.current > 0;
             const isSilent = hadPrevious && inboundBytes <= lastInboundAudioBytesRef.current;
             lastInboundAudioBytesRef.current = inboundBytes;
-            if (callDuration >= 5 && isSilent && Date.now() - lastRepairRequestAtRef.current > 8000) {
+            if (Date.now() - connectedAtRef.current > 5000 && isSilent && Date.now() - lastRepairRequestAtRef.current > 8000) {
               lastRepairRequestAtRef.current = Date.now();
               requestConnectionRepair('no-audio-bytes').catch(() => undefined);
             }
@@ -291,7 +294,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     };
 
     return pc;
-  }, [user, initialStream, isVideo, requestConnectionRepair, callDuration]);
+  }, [user, initialStream, isVideo, requestConnectionRepair]);
 
   const startAsCaller = useCallback(async () => {
     try {
