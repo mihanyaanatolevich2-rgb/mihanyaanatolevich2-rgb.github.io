@@ -430,6 +430,8 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
           } else if (signal.signal_type === 'ice-candidate') {
             const candidate = getSignalCandidate(signal.signal_data);
             if (candidate) await addIceCandidate(candidate);
+          } else if (signal.signal_type === 'ice-restart-needed') {
+            await restartIceWithOffer('peer-requested-repair');
           } else if (signal.signal_type === 'hang-up') {
             if (!endedRef.current) {
               endedRef.current = true;
@@ -445,7 +447,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user, conversationId, cleanup, onEnd, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates]);
+  }, [user, conversationId, cleanup, onEnd, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates, restartIceWithOffer]);
 
   // Start call
   useEffect(() => {
