@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy, Pin, PinOff, MessageCircle, Lock } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy, Pin, PinOff, MessageCircle, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
@@ -50,6 +50,14 @@ interface ChannelComment {
   created_at: string;
 }
 
+interface ForwardTarget {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  isGroup: boolean;
+  isChannel: boolean;
+}
+
 interface ChatViewProps {
   conversationId: string;
   onBack: () => void;
@@ -86,6 +94,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [isCaller, setIsCaller] = useState(false);
   const [incomingCall, setIncomingCall] = useState<{ type: 'audio' | 'video'; callId: string } | null>(null);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
+  const [callPeerId, setCallPeerId] = useState('');
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editText, setEditText] = useState('');
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -101,6 +110,10 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [commentsByMessage, setCommentsByMessage] = useState<Map<string, ChannelComment[]>>(new Map());
   const [openComments, setOpenComments] = useState<Set<string>>(new Set());
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
+  const [forwardTargets, setForwardTargets] = useState<ForwardTarget[]>([]);
+  const [forwardSearch, setForwardSearch] = useState('');
+  const [forwarding, setForwarding] = useState(false);
   const [wallpaperStyle, setWallpaperStyle] = useState<React.CSSProperties>({});
   const [isExiting, setIsExiting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
