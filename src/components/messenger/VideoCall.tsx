@@ -401,10 +401,10 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     if (signal.conversation_id !== conversationId) return;
     if (signal.call_id && signal.call_id !== callIdRef.current) return;
     if (signal.id && processedSignalIdsRef.current.has(signal.id)) return;
-    if (signal.id) processedSignalIdsRef.current.add(signal.id);
 
     const pc = pcRef.current;
     if (!pc && signal.signal_type !== 'hang-up') return;
+    if (signal.id) processedSignalIdsRef.current.add(signal.id);
 
     try {
       if (signal.signal_type === 'offer' && pc && !isCaller && isSessionDescription(signal.signal_data)) {
