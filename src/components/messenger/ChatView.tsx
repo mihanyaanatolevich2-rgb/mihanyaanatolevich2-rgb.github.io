@@ -560,7 +560,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         if (signal.conversation_id !== conversationId) return;
         if (signal.signal_type === 'offer' && !callType) {
           const isVideoCall = signal.signal_data?.isVideo || false;
-          setIncomingCall({ type: isVideoCall ? 'video' : 'audio', callId: signal.call_id });
+          setIncomingCall({ type: isVideoCall ? 'video' : 'audio', callId: signal.call_id, callerId: signal.sender_id });
         }
       })
       .subscribe();
@@ -693,12 +693,29 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   };
 
   const forwardMessage = async (msg: Message) => {
-    const textToCopy = msg.content || msg.file_url || '';
-    if (!textToCopy) { toast.error('Нечего копировать'); return; }
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-      toast.success(msg.file_url ? 'Ссылка на файл скопирована — вставьте в нужный чат' : 'Сообщение скопировано — вставьте в нужный чат');
-    } catch { toast.error('Не удалось скопировать'); }
+    setForwardingMessage(msg);
+    setForwardSearch('');
+    loadForwardTargets();
+  };
+
+  const sendForwardedMessage = async (targetConversationId: string) => {
+    if (!user || !forwardingMessage || forwarding) return;
+    setForwarding(true);
+    const { error } = await supabase.from('messages').insert({
+      conversation_id: targetConversationId,
+      sender_id: user.id,
+      content: forwardingMessage.content,
+      message_type: forwardingMessage.message_type,
+      file_url: forwardingMessage.file_url,
+      file_name: forwardingMessage.file_name,
+    } as any);
+    setForwarding(false);
+    if (error) {
+      toast.error('Не удалось переслать сообщение');
+      return;
+    }
+    setForwardingMessage(null);
+    toast.success('Сообщение переслано');
   };
 
   const startReply = (msg: Message) => {
