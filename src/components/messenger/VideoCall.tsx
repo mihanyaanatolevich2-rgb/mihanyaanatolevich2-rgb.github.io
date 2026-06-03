@@ -16,6 +16,7 @@ interface VideoCallProps {
 }
 
 type CallSignalRow = {
+  id?: string;
   conversation_id: string;
   sender_id: string;
   receiver_id: string;
@@ -38,14 +39,11 @@ const getSignalCandidate = (data: unknown): RTCIceCandidateInit | null => {
 };
 
 const ICE_SERVERS: RTCConfiguration = {
-  iceTransportPolicy: 'relay',
+  iceTransportPolicy: 'all',
   iceServers: [
     { urls: 'stun:stun.relay.metered.ca:80' },
     { urls: 'stun:openrelay.metered.ca:80' },
-    { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:stun.nextcloud.com:443' },
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
     {
       urls: 'turn:global.relay.metered.ca:80',
       username: 'openrelayproject',
@@ -113,6 +111,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const remoteDescSetRef = useRef(false);
   const relayRestartedRef = useRef(false);
   const iceRestartAttemptsRef = useRef(0);
+  const processedSignalIdsRef = useRef<Set<string>>(new Set());
   const audioStatsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastInboundAudioBytesRef = useRef(0);
   const lastRepairRequestAtRef = useRef(0);
@@ -139,6 +138,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     localStreamRef.current = null;
     remoteDescSetRef.current = false;
     pendingCandidatesRef.current = [];
+    processedSignalIdsRef.current.clear();
     audioStatsTimerRef.current = null;
     lastInboundAudioBytesRef.current = 0;
     lastRepairRequestAtRef.current = 0;
@@ -264,7 +264,8 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       }
       if (pc.iceConnectionState === 'disconnected') {
         setTimeout(() => {
-          if (pcRef.current?.iceConnectionState === 'disconnected' && !relayRestartedRef.current) {
+            if (pcRef.current?.iceConnectionState === 'disconnected' && Date.now() - lastRepairRequestAtRef.current > 6000) {
+              lastRepairRequestAtRef.current = Date.now();
             requestConnectionRepair('ice-disconnected').catch(() => undefined);
           }
         }, 2500);
