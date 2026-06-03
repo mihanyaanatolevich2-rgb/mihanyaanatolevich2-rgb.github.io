@@ -1253,6 +1253,52 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         </div>
       )}
 
+      <Dialog open={!!forwardingMessage} onOpenChange={(open) => !open && setForwardingMessage(null)}>
+        <DialogContent className="max-w-sm bg-popover border-border p-0 overflow-hidden">
+          <div className="border-b border-border px-4 py-3">
+            <p className="text-sm font-semibold text-foreground">Переслать сообщение</p>
+            {forwardingMessage && (
+              <p className="mt-1 truncate text-xs text-muted-foreground">{getMessagePreview(forwardingMessage)}</p>
+            )}
+          </div>
+          <div className="px-3 pt-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={forwardSearch}
+                onChange={(e) => setForwardSearch(e.target.value)}
+                placeholder="Кому переслать..."
+                className="h-10 w-full rounded-xl bg-secondary pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          </div>
+          <div className="max-h-80 overflow-y-auto p-2">
+            {filteredForwardTargets.length === 0 ? (
+              <p className="px-3 py-8 text-center text-sm text-muted-foreground">Нет доступных чатов</p>
+            ) : filteredForwardTargets.map(target => (
+              <button
+                key={target.id}
+                type="button"
+                disabled={forwarding}
+                onClick={() => sendForwardedMessage(target.id)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-secondary disabled:opacity-60"
+              >
+                <Avatar className="h-10 w-10 shrink-0">
+                  {target.avatarUrl && <AvatarImage src={target.avatarUrl} />}
+                  <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
+                    {target.isChannel ? '📣' : target.isGroup ? '👥' : target.name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{target.name}</p>
+                  <p className="text-xs text-muted-foreground">{target.isChannel ? 'Канал' : target.isGroup ? 'Группа' : 'Личный чат'}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Image zoom dialog */}
       <Dialog open={!!zoomImage} onOpenChange={(o) => { if (!o) { setZoomImage(null); setZoomScale(1); setZoomPos({ x: 0, y: 0 }); } }}>
         <DialogContent className="bg-black/90 border-none shadow-none max-w-[100vw] max-h-[100vh] w-screen h-screen p-0 flex items-center justify-center overflow-hidden"
