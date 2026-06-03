@@ -365,7 +365,8 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
           .limit(1);
 
         if (signals && signals.length > 0) {
-          offer = signals[0];
+          offer = signals[0] as CallSignalRow;
+          if (offer.id) processedSignalIdsRef.current.add(offer.id);
           break;
         }
         await new Promise(r => setTimeout(r, 500));
@@ -396,6 +397,50 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     }
   }, [setupPeerConnection, onEnd, user, conversationId, sendSignal, flushCandidates, fetchMissedIceCandidates]);
 
+  const handleSignal = useCallback(async (signal: CallSignalRow) => {
+    if (signal.conversation_id !== conversationId) return;
+    if (signal.call_id && signal.call_id !== callIdRef.current) return;
+    if (signal.id && processedSignalIdsRef.current.has(signal.id)) return;
+    if (signal.id) processedSignalIdsRef.current.add(signal.id);
+
+    const pc = pcRef.current;
+    if (!pc && signal.signal_type !== 'hang-up') return;
+
+    try {
+      if (signal.signal_type === 'offer' && pc && !isCaller && isSessionDescription(signal.signal_data)) {
+        if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-local-offer') return;
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+        remoteDescSetRef.current = true;
+        await flushCandidates();
+        await fetchMissedIceCandidates();
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
+      } else if (signal.signal_type === 'answer' && pc && isSessionDescription(signal.signal_data)) {
+        if (pc.signalingState === 'have-local-offer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
+          remoteDescSetRef.current = true;
+          await flushCandidates();
+          await fetchMissedIceCandidates();
+        }
+      } else if (signal.signal_type === 'ice-candidate') {
+        const candidate = getSignalCandidate(signal.signal_data);
+        if (candidate) await addIceCandidate(candidate);
+      } else if (signal.signal_type === 'ice-restart-needed') {
+        await restartIceWithOffer('peer-requested-repair');
+      } else if (signal.signal_type === 'hang-up') {
+        if (!endedRef.current) {
+          endedRef.current = true;
+          cleanup();
+          setStatus('ended');
+          onEnd();
+        }
+      }
+    } catch (err) {
+      console.error('Signal handling error:', err);
+    }
+  }, [conversationId, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates, restartIceWithOffer, cleanup, onEnd]);
+
   // Listen for signals via realtime
   useEffect(() => {
     if (!user) return;
@@ -407,50 +452,34 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         schema: 'public',
         table: 'call_signals',
         filter: `receiver_id=eq.${user.id}`,
-      }, async (payload) => {
-        const signal = payload.new as CallSignalRow;
-        if (signal.conversation_id !== conversationId) return;
-        if (signal.call_id && signal.call_id !== callIdRef.current) return;
-        const pc = pcRef.current;
-        if (!pc && signal.signal_type !== 'hang-up') return;
-
-        try {
-          if (signal.signal_type === 'offer' && pc && !isCaller && isSessionDescription(signal.signal_data)) {
-            await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
-            remoteDescSetRef.current = true;
-            await flushCandidates();
-            await fetchMissedIceCandidates();
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            await sendSignal('answer', { sdp: answer.sdp, type: answer.type });
-          } else if (signal.signal_type === 'answer' && pc && isSessionDescription(signal.signal_data)) {
-            if (pc.signalingState === 'have-local-offer') {
-              await pc.setRemoteDescription(new RTCSessionDescription(signal.signal_data));
-              remoteDescSetRef.current = true;
-              await flushCandidates();
-              await fetchMissedIceCandidates();
-            }
-          } else if (signal.signal_type === 'ice-candidate') {
-            const candidate = getSignalCandidate(signal.signal_data);
-            if (candidate) await addIceCandidate(candidate);
-          } else if (signal.signal_type === 'ice-restart-needed') {
-            await restartIceWithOffer('peer-requested-repair');
-          } else if (signal.signal_type === 'hang-up') {
-            if (!endedRef.current) {
-              endedRef.current = true;
-              cleanup();
-              setStatus('ended');
-              onEnd();
-            }
-          }
-        } catch (err) {
-          console.error('Signal handling error:', err);
-        }
+      }, (payload) => {
+        handleSignal(payload.new as CallSignalRow);
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user, conversationId, cleanup, onEnd, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates, restartIceWithOffer]);
+  }, [user, conversationId, handleSignal]);
+
+  useEffect(() => {
+    if (!user) return;
+    const poll = async () => {
+      if (endedRef.current) return;
+      const { data } = await supabase
+        .from('call_signals')
+        .select('*')
+        .eq('receiver_id', user.id)
+        .eq('call_id', callIdRef.current)
+        .order('created_at', { ascending: true })
+        .limit(50);
+
+      for (const signal of (data as unknown as CallSignalRow[] | null) || []) {
+        await handleSignal(signal);
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 1500);
+    return () => clearInterval(interval);
+  }, [user, handleSignal]);
 
   // Start call
   useEffect(() => {
