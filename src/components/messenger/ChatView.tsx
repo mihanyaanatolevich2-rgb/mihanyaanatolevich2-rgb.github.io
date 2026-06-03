@@ -58,6 +58,14 @@ interface ForwardTarget {
   isChannel: boolean;
 }
 
+interface ConversationLookup {
+  id: string;
+  name: string | null;
+  is_group: boolean | null;
+  is_channel?: boolean | null;
+  avatar_url?: string | null;
+}
+
 interface ChatViewProps {
   conversationId: string;
   onBack: () => void;
@@ -255,7 +263,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     }
 
     const [convRes, partsRes] = await Promise.all([
-      (supabase.from as any)('conversations')
+      supabase.from('conversations')
         .select('id, name, is_group, is_channel, avatar_url')
         .in('id', convIds),
       supabase
@@ -282,7 +290,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       for (const p of data || []) profiles.set(p.user_id, p);
     }
 
-    const targets = ((convRes.data || []) as any[]).map((conv) => {
+    const targets = ((convRes.data || []) as unknown as ConversationLookup[]).map((conv) => {
       const isGroupTarget = Boolean(conv.is_group);
       const isChannelTarget = Boolean(conv.is_channel);
       if (isGroupTarget || isChannelTarget) {
@@ -708,7 +716,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
       message_type: forwardingMessage.message_type,
       file_url: forwardingMessage.file_url,
       file_name: forwardingMessage.file_name,
-    } as any);
+    } as never);
     setForwarding(false);
     if (error) {
       toast.error('Не удалось переслать сообщение');
@@ -1077,7 +1085,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         signal_type: 'hang-up',
         call_id: incomingCall.callId,
         signal_data: {},
-      } as any);
+      } as never);
     }
     setIncomingCall(null);
   };
