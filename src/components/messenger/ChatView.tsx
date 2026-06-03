@@ -803,6 +803,10 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     () => messages.filter(m => !deletedIds.has(m.id) && !m.deleted_for_all),
     [messages, deletedIds]
   );
+  const filteredForwardTargets = useMemo(
+    () => forwardTargets.filter(target => target.name.toLowerCase().includes(forwardSearch.toLowerCase())),
+    [forwardTargets, forwardSearch]
+  );
   const messagesById = useMemo(() => {
     const m = new Map<string, Message>();
     for (const msg of messages) m.set(msg.id, msg);
@@ -1036,7 +1040,12 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
   const startCall = async (type: 'audio' | 'video') => {
     try {
+      if (!partnerId) {
+        toast.error('Собеседник не найден');
+        return;
+      }
       pendingCallStreamRef.current = await getCallStream(type);
+      setCallPeerId(partnerId);
       setActiveCallId(crypto.randomUUID());
       setIsCaller(true);
       setCallType(type);
@@ -1049,6 +1058,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     if (!incomingCall) return;
     try {
       pendingCallStreamRef.current = await getCallStream(incomingCall.type);
+      setCallPeerId(incomingCall.callerId);
       setActiveCallId(incomingCall.callId);
       setIsCaller(false);
       setCallType(incomingCall.type);
@@ -1059,11 +1069,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   };
 
   const rejectCall = async () => {
-    if (incomingCall && user && partnerId) {
+    if (incomingCall && user) {
       await supabase.from('call_signals').insert({
         conversation_id: conversationId,
         sender_id: user.id,
-        receiver_id: partnerId,
+        receiver_id: incomingCall.callerId,
         signal_type: 'hang-up',
         call_id: incomingCall.callId,
         signal_data: {},
@@ -1076,13 +1086,13 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return (
       <VideoCall
         conversationId={conversationId}
-        partnerId={partnerId}
+        partnerId={callPeerId || partnerId}
         partnerName={displayName}
         isVideo={callType === 'video'}
         isCaller={isCaller}
         callId={activeCallId}
         initialStream={pendingCallStreamRef.current}
-        onEnd={() => { pendingCallStreamRef.current = null; setCallType(null); setIsCaller(false); setActiveCallId(null); }}
+        onEnd={() => { pendingCallStreamRef.current = null; setCallType(null); setIsCaller(false); setActiveCallId(null); setCallPeerId(''); }}
       />
     );
   }
