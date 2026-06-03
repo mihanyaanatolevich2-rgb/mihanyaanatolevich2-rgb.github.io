@@ -92,7 +92,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [uploading, setUploading] = useState(false);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
   const [isCaller, setIsCaller] = useState(false);
-  const [incomingCall, setIncomingCall] = useState<{ type: 'audio' | 'video'; callId: string } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ type: 'audio' | 'video'; callId: string; callerId: string } | null>(null);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
   const [callPeerId, setCallPeerId] = useState('');
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -231,6 +231,70 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     }
     setCommentsByMessage(map);
   };
+
+  const getMessagePreview = (msg: Message) => {
+    if (msg.message_type === 'text') return msg.content || 'Сообщение';
+    if (msg.message_type === 'audio' || msg.message_type === 'voice') return `🎵 ${msg.file_name || 'Аудио'}`;
+    if (msg.message_type === 'image') return `🖼️ ${msg.file_name || 'Фото'}`;
+    if (msg.message_type === 'video' || msg.message_type === 'video_circle') return `🎬 ${msg.file_name || 'Видео'}`;
+    return `📎 ${msg.file_name || 'Файл'}`;
+  };
+
+  const loadForwardTargets = useCallback(async () => {
+    if (!user) return;
+
+    const { data: myParts } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('user_id', user.id);
+
+    const convIds = (myParts || []).map(p => p.conversation_id).filter(id => id !== conversationId);
+    if (convIds.length === 0) {
+      setForwardTargets([]);
+      return;
+    }
+
+    const [convRes, partsRes] = await Promise.all([
+      (supabase.from as any)('conversations')
+        .select('id, name, is_group, is_channel, avatar_url')
+        .in('id', convIds),
+      supabase
+        .from('conversation_participants')
+        .select('conversation_id, user_id')
+        .in('conversation_id', convIds),
+    ]);
+
+    const partsByConv = new Map<string, string[]>();
+    const otherIds = new Set<string>();
+    for (const p of partsRes.data || []) {
+      const arr = partsByConv.get(p.conversation_id) || [];
+      arr.push(p.user_id);
+      partsByConv.set(p.conversation_id, arr);
+      if (p.user_id !== user.id) otherIds.add(p.user_id);
+    }
+
+    const profiles = new Map<string, { display_name: string | null; username: string; avatar_url: string | null }>();
+    if (otherIds.size > 0) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('user_id, display_name, username, avatar_url')
+        .in('user_id', Array.from(otherIds));
+      for (const p of data || []) profiles.set(p.user_id, p);
+    }
+
+    const targets = ((convRes.data || []) as any[]).map((conv) => {
+      const isGroupTarget = Boolean(conv.is_group);
+      const isChannelTarget = Boolean(conv.is_channel);
+      if (isGroupTarget || isChannelTarget) {
+        return { id: conv.id, name: conv.name || (isChannelTarget ? 'Канал' : 'Группа'), avatarUrl: conv.avatar_url || null, isGroup: isGroupTarget, isChannel: isChannelTarget };
+      }
+      const otherId = (partsByConv.get(conv.id) || []).find(id => id !== user.id);
+      const profile = otherId ? profiles.get(otherId) : null;
+      return { id: conv.id, name: profile?.display_name || profile?.username || 'Чат', avatarUrl: profile?.avatar_url || null, isGroup: false, isChannel: false };
+    });
+
+    setForwardTargets(targets.sort((a, b) => a.name.localeCompare(b.name, 'ru')));
+  }, [user, conversationId]);
 
   // Load conversation info
   useEffect(() => {
