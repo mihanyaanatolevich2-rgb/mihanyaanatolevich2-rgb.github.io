@@ -651,7 +651,7 @@ const ChatList = ({ selectedChat, onSelectChat }: ChatListProps) => {
                   <div>
                     <p className="text-sm font-medium text-foreground">{Number.isFinite(weatherData.temp) ? `${weatherData.temp}°C` : 'Прогноз'}</p>
                     <a
-                      href={weatherData.forecastUrl || `https://global-weather-world.lovable.app/?city=${encodeURIComponent(weatherCity)}`}
+                      href={weatherData.forecastUrl || `https://yandex.ru/pogoda/search?request=${encodeURIComponent(weatherCity)}`}
                       target="_blank"
                       rel="noreferrer"
                       className="text-[10px] text-muted-foreground leading-tight hover:text-primary transition-colors"
