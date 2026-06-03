@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy, Pin, PinOff, MessageCircle, Lock } from 'lucide-react';
+import { Send, Paperclip, Phone, Video, ArrowLeft, FileIcon, Edit2, Trash2, TrashIcon, X, Check, CheckCheck, Reply, Download, Forward, Copy, Pin, PinOff, MessageCircle, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import VideoCall from './VideoCall';
@@ -50,6 +50,22 @@ interface ChannelComment {
   created_at: string;
 }
 
+interface ForwardTarget {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  isGroup: boolean;
+  isChannel: boolean;
+}
+
+interface ConversationLookup {
+  id: string;
+  name: string | null;
+  is_group: boolean | null;
+  is_channel?: boolean | null;
+  avatar_url?: string | null;
+}
+
 interface ChatViewProps {
   conversationId: string;
   onBack: () => void;
@@ -84,8 +100,9 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [uploading, setUploading] = useState(false);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
   const [isCaller, setIsCaller] = useState(false);
-  const [incomingCall, setIncomingCall] = useState<{ type: 'audio' | 'video'; callId: string } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ type: 'audio' | 'video'; callId: string; callerId: string } | null>(null);
   const [activeCallId, setActiveCallId] = useState<string | null>(null);
+  const [callPeerId, setCallPeerId] = useState('');
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editText, setEditText] = useState('');
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -101,6 +118,10 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const [commentsByMessage, setCommentsByMessage] = useState<Map<string, ChannelComment[]>>(new Map());
   const [openComments, setOpenComments] = useState<Set<string>>(new Set());
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
+  const [forwardTargets, setForwardTargets] = useState<ForwardTarget[]>([]);
+  const [forwardSearch, setForwardSearch] = useState('');
+  const [forwarding, setForwarding] = useState(false);
   const [wallpaperStyle, setWallpaperStyle] = useState<React.CSSProperties>({});
   const [isExiting, setIsExiting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -218,6 +239,70 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     }
     setCommentsByMessage(map);
   };
+
+  const getMessagePreview = (msg: Message) => {
+    if (msg.message_type === 'text') return msg.content || 'Сообщение';
+    if (msg.message_type === 'audio' || msg.message_type === 'voice') return `🎵 ${msg.file_name || 'Аудио'}`;
+    if (msg.message_type === 'image') return `🖼️ ${msg.file_name || 'Фото'}`;
+    if (msg.message_type === 'video' || msg.message_type === 'video_circle') return `🎬 ${msg.file_name || 'Видео'}`;
+    return `📎 ${msg.file_name || 'Файл'}`;
+  };
+
+  const loadForwardTargets = useCallback(async () => {
+    if (!user) return;
+
+    const { data: myParts } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('user_id', user.id);
+
+    const convIds = (myParts || []).map(p => p.conversation_id).filter(id => id !== conversationId);
+    if (convIds.length === 0) {
+      setForwardTargets([]);
+      return;
+    }
+
+    const [convRes, partsRes] = await Promise.all([
+      supabase.from('conversations')
+        .select('id, name, is_group, is_channel, avatar_url')
+        .in('id', convIds),
+      supabase
+        .from('conversation_participants')
+        .select('conversation_id, user_id')
+        .in('conversation_id', convIds),
+    ]);
+
+    const partsByConv = new Map<string, string[]>();
+    const otherIds = new Set<string>();
+    for (const p of partsRes.data || []) {
+      const arr = partsByConv.get(p.conversation_id) || [];
+      arr.push(p.user_id);
+      partsByConv.set(p.conversation_id, arr);
+      if (p.user_id !== user.id) otherIds.add(p.user_id);
+    }
+
+    const profiles = new Map<string, { display_name: string | null; username: string; avatar_url: string | null }>();
+    if (otherIds.size > 0) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('user_id, display_name, username, avatar_url')
+        .in('user_id', Array.from(otherIds));
+      for (const p of data || []) profiles.set(p.user_id, p);
+    }
+
+    const targets = ((convRes.data || []) as unknown as ConversationLookup[]).map((conv) => {
+      const isGroupTarget = Boolean(conv.is_group);
+      const isChannelTarget = Boolean(conv.is_channel);
+      if (isGroupTarget || isChannelTarget) {
+        return { id: conv.id, name: conv.name || (isChannelTarget ? 'Канал' : 'Группа'), avatarUrl: conv.avatar_url || null, isGroup: isGroupTarget, isChannel: isChannelTarget };
+      }
+      const otherId = (partsByConv.get(conv.id) || []).find(id => id !== user.id);
+      const profile = otherId ? profiles.get(otherId) : null;
+      return { id: conv.id, name: profile?.display_name || profile?.username || 'Чат', avatarUrl: profile?.avatar_url || null, isGroup: false, isChannel: false };
+    });
+
+    setForwardTargets(targets.sort((a, b) => a.name.localeCompare(b.name, 'ru')));
+  }, [user, conversationId]);
 
   // Load conversation info
   useEffect(() => {
@@ -483,7 +568,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         if (signal.conversation_id !== conversationId) return;
         if (signal.signal_type === 'offer' && !callType) {
           const isVideoCall = signal.signal_data?.isVideo || false;
-          setIncomingCall({ type: isVideoCall ? 'video' : 'audio', callId: signal.call_id });
+          setIncomingCall({ type: isVideoCall ? 'video' : 'audio', callId: signal.call_id, callerId: signal.sender_id });
         }
       })
       .subscribe();
@@ -616,12 +701,29 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   };
 
   const forwardMessage = async (msg: Message) => {
-    const textToCopy = msg.content || msg.file_url || '';
-    if (!textToCopy) { toast.error('Нечего копировать'); return; }
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-      toast.success(msg.file_url ? 'Ссылка на файл скопирована — вставьте в нужный чат' : 'Сообщение скопировано — вставьте в нужный чат');
-    } catch { toast.error('Не удалось скопировать'); }
+    setForwardingMessage(msg);
+    setForwardSearch('');
+    loadForwardTargets();
+  };
+
+  const sendForwardedMessage = async (targetConversationId: string) => {
+    if (!user || !forwardingMessage || forwarding) return;
+    setForwarding(true);
+    const { error } = await supabase.from('messages').insert({
+      conversation_id: targetConversationId,
+      sender_id: user.id,
+      content: forwardingMessage.content,
+      message_type: forwardingMessage.message_type,
+      file_url: forwardingMessage.file_url,
+      file_name: forwardingMessage.file_name,
+    } as never);
+    setForwarding(false);
+    if (error) {
+      toast.error('Не удалось переслать сообщение');
+      return;
+    }
+    setForwardingMessage(null);
+    toast.success('Сообщение переслано');
   };
 
   const startReply = (msg: Message) => {
@@ -708,6 +810,10 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const visibleMessages = useMemo(
     () => messages.filter(m => !deletedIds.has(m.id) && !m.deleted_for_all),
     [messages, deletedIds]
+  );
+  const filteredForwardTargets = useMemo(
+    () => forwardTargets.filter(target => target.name.toLowerCase().includes(forwardSearch.toLowerCase())),
+    [forwardTargets, forwardSearch]
   );
   const messagesById = useMemo(() => {
     const m = new Map<string, Message>();
@@ -942,7 +1048,12 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
 
   const startCall = async (type: 'audio' | 'video') => {
     try {
+      if (!partnerId) {
+        toast.error('Собеседник не найден');
+        return;
+      }
       pendingCallStreamRef.current = await getCallStream(type);
+      setCallPeerId(partnerId);
       setActiveCallId(crypto.randomUUID());
       setIsCaller(true);
       setCallType(type);
@@ -955,6 +1066,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     if (!incomingCall) return;
     try {
       pendingCallStreamRef.current = await getCallStream(incomingCall.type);
+      setCallPeerId(incomingCall.callerId);
       setActiveCallId(incomingCall.callId);
       setIsCaller(false);
       setCallType(incomingCall.type);
@@ -965,15 +1077,15 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   };
 
   const rejectCall = async () => {
-    if (incomingCall && user && partnerId) {
+    if (incomingCall && user) {
       await supabase.from('call_signals').insert({
         conversation_id: conversationId,
         sender_id: user.id,
-        receiver_id: partnerId,
+        receiver_id: incomingCall.callerId,
         signal_type: 'hang-up',
         call_id: incomingCall.callId,
         signal_data: {},
-      } as any);
+      } as never);
     }
     setIncomingCall(null);
   };
@@ -982,13 +1094,13 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     return (
       <VideoCall
         conversationId={conversationId}
-        partnerId={partnerId}
+        partnerId={callPeerId || partnerId}
         partnerName={displayName}
         isVideo={callType === 'video'}
         isCaller={isCaller}
         callId={activeCallId}
         initialStream={pendingCallStreamRef.current}
-        onEnd={() => { pendingCallStreamRef.current = null; setCallType(null); setIsCaller(false); setActiveCallId(null); }}
+        onEnd={() => { pendingCallStreamRef.current = null; setCallType(null); setIsCaller(false); setActiveCallId(null); setCallPeerId(''); }}
       />
     );
   }
@@ -1148,6 +1260,52 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
           </form>
         </div>
       )}
+
+      <Dialog open={!!forwardingMessage} onOpenChange={(open) => !open && setForwardingMessage(null)}>
+        <DialogContent className="max-w-sm bg-popover border-border p-0 overflow-hidden">
+          <div className="border-b border-border px-4 py-3">
+            <p className="text-sm font-semibold text-foreground">Переслать сообщение</p>
+            {forwardingMessage && (
+              <p className="mt-1 truncate text-xs text-muted-foreground">{getMessagePreview(forwardingMessage)}</p>
+            )}
+          </div>
+          <div className="px-3 pt-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={forwardSearch}
+                onChange={(e) => setForwardSearch(e.target.value)}
+                placeholder="Кому переслать..."
+                className="h-10 w-full rounded-xl bg-secondary pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          </div>
+          <div className="max-h-80 overflow-y-auto p-2">
+            {filteredForwardTargets.length === 0 ? (
+              <p className="px-3 py-8 text-center text-sm text-muted-foreground">Нет доступных чатов</p>
+            ) : filteredForwardTargets.map(target => (
+              <button
+                key={target.id}
+                type="button"
+                disabled={forwarding}
+                onClick={() => sendForwardedMessage(target.id)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-secondary disabled:opacity-60"
+              >
+                <Avatar className="h-10 w-10 shrink-0">
+                  {target.avatarUrl && <AvatarImage src={target.avatarUrl} />}
+                  <AvatarFallback className="gradient-primary text-primary-foreground text-sm font-semibold">
+                    {target.isChannel ? '📣' : target.isGroup ? '👥' : target.name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{target.name}</p>
+                  <p className="text-xs text-muted-foreground">{target.isChannel ? 'Канал' : target.isGroup ? 'Группа' : 'Личный чат'}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Image zoom dialog */}
       <Dialog open={!!zoomImage} onOpenChange={(o) => { if (!o) { setZoomImage(null); setZoomScale(1); setZoomPos({ x: 0, y: 0 }); } }}>

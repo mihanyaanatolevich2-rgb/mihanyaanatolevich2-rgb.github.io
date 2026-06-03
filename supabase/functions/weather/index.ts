@@ -99,7 +99,7 @@ async function fetchOpenMeteo(place: { name: string; latitude: number; longitude
     description: describeWmo(code),
     icon: getWeatherEmoji(code, Number(current.is_day) === 1),
     city: place.name,
-    forecastUrl: `https://global-weather-world.lovable.app/?city=${encodeURIComponent(place.name)}`,
+    forecastUrl: `https://yandex.ru/pogoda/search?request=${encodeURIComponent(place.name)}`,
   };
 }
 
@@ -115,7 +115,7 @@ async function fetchWttr(rawCity: string): Promise<WeatherResult | null> {
     description: current.weatherDesc?.[0]?.value || describeWmo(code),
     icon: getWeatherEmoji(code),
     city: rawCity,
-    forecastUrl: `https://global-weather-world.lovable.app/?city=${encodeURIComponent(rawCity)}`,
+    forecastUrl: `https://yandex.ru/pogoda/search?request=${encodeURIComponent(rawCity)}`,
   };
 }
 
