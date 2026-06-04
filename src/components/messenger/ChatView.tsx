@@ -129,6 +129,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingCallStreamRef = useRef<MediaStream | null>(null);
+  const incomingCallIdsRef = useRef<Set<string>>(new Set());
   const [maxCharsPerLine, setMaxCharsPerLine] = useState(() => {
     const saved = localStorage.getItem('msg-max-chars');
     return saved ? Number(saved) : 40;
@@ -556,6 +557,35 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   useEffect(() => {
     if (!user || isGroup) return;
 
+    const handleIncomingSignal = (signal: any) => {
+      if (signal.conversation_id !== conversationId) return;
+      if (signal.signal_type === 'hang-up') {
+        setIncomingCall(current => current?.callId === signal.call_id ? null : current);
+        return;
+      }
+      if (signal.signal_type === 'offer' && !callType && !incomingCallIdsRef.current.has(signal.call_id)) {
+        incomingCallIdsRef.current.add(signal.call_id);
+        const isVideoCall = signal.signal_data?.isVideo || false;
+        setIncomingCall({ type: isVideoCall ? 'video' : 'audio', callId: signal.call_id, callerId: signal.sender_id });
+      }
+    };
+
+    const pollIncomingSignals = async () => {
+      const { data } = await supabase
+        .from('call_signals')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .eq('receiver_id', user.id)
+        .in('signal_type', ['offer', 'hang-up'])
+        .order('created_at', { ascending: false })
+        .limit(12);
+
+      [...((data as any[]) || [])].reverse().forEach(handleIncomingSignal);
+    };
+
+    pollIncomingSignals();
+    const pollInterval = window.setInterval(pollIncomingSignals, 2000);
+
     const channel = supabase
       .channel(`incoming-call-${conversationId}-${user.id}`)
       .on('postgres_changes', {
@@ -564,16 +594,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         table: 'call_signals',
         filter: `receiver_id=eq.${user.id}`,
       }, (payload) => {
-        const signal = payload.new as any;
-        if (signal.conversation_id !== conversationId) return;
-        if (signal.signal_type === 'offer' && !callType) {
-          const isVideoCall = signal.signal_data?.isVideo || false;
-          setIncomingCall({ type: isVideoCall ? 'video' : 'audio', callId: signal.call_id, callerId: signal.sender_id });
-        }
+        handleIncomingSignal(payload.new as any);
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { window.clearInterval(pollInterval); supabase.removeChannel(channel); };
   }, [user, conversationId, isGroup, callType]);
 
   // Scroll to bottom when new messages arrive
