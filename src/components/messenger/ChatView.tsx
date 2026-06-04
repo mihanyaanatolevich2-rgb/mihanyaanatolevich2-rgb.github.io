@@ -66,6 +66,14 @@ interface ConversationLookup {
   avatar_url?: string | null;
 }
 
+interface CallSignalRow {
+  conversation_id: string;
+  sender_id: string;
+  signal_type: string;
+  signal_data: { isVideo?: boolean } | null;
+  call_id: string;
+}
+
 interface ChatViewProps {
   conversationId: string;
   onBack: () => void;
@@ -129,6 +137,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingCallStreamRef = useRef<MediaStream | null>(null);
+  const incomingCallIdsRef = useRef<Set<string>>(new Set());
   const [maxCharsPerLine, setMaxCharsPerLine] = useState(() => {
     const saved = localStorage.getItem('msg-max-chars');
     return saved ? Number(saved) : 40;
@@ -556,6 +565,35 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   useEffect(() => {
     if (!user || isGroup) return;
 
+    const handleIncomingSignal = (signal: CallSignalRow) => {
+      if (signal.conversation_id !== conversationId) return;
+      if (signal.signal_type === 'hang-up') {
+        setIncomingCall(current => current?.callId === signal.call_id ? null : current);
+        return;
+      }
+      if (signal.signal_type === 'offer' && !callType && !incomingCallIdsRef.current.has(signal.call_id)) {
+        incomingCallIdsRef.current.add(signal.call_id);
+        const isVideoCall = signal.signal_data?.isVideo || false;
+        setIncomingCall({ type: isVideoCall ? 'video' : 'audio', callId: signal.call_id, callerId: signal.sender_id });
+      }
+    };
+
+    const pollIncomingSignals = async () => {
+      const { data } = await supabase
+        .from('call_signals')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .eq('receiver_id', user.id)
+        .in('signal_type', ['offer', 'hang-up'])
+        .order('created_at', { ascending: false })
+        .limit(12);
+
+      [...((data as unknown as CallSignalRow[]) || [])].reverse().forEach(handleIncomingSignal);
+    };
+
+    pollIncomingSignals();
+    const pollInterval = window.setInterval(pollIncomingSignals, 2000);
+
     const channel = supabase
       .channel(`incoming-call-${conversationId}-${user.id}`)
       .on('postgres_changes', {
@@ -564,16 +602,11 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         table: 'call_signals',
         filter: `receiver_id=eq.${user.id}`,
       }, (payload) => {
-        const signal = payload.new as any;
-        if (signal.conversation_id !== conversationId) return;
-        if (signal.signal_type === 'offer' && !callType) {
-          const isVideoCall = signal.signal_data?.isVideo || false;
-          setIncomingCall({ type: isVideoCall ? 'video' : 'audio', callId: signal.call_id, callerId: signal.sender_id });
-        }
+        handleIncomingSignal(payload.new as CallSignalRow);
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { window.clearInterval(pollInterval); supabase.removeChannel(channel); };
   }, [user, conversationId, isGroup, callType]);
 
   // Scroll to bottom when new messages arrive
@@ -1090,6 +1123,30 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     setIncomingCall(null);
   };
 
+  const finishCall = async (info: { duration: number; answered: boolean }) => {
+    pendingCallStreamRef.current = null;
+    const shouldSaveCallMessage = isCaller && user && callType;
+    const endedCallType = callType;
+    setCallType(null);
+    setIsCaller(false);
+    setActiveCallId(null);
+    setCallPeerId('');
+
+    if (shouldSaveCallMessage && endedCallType) {
+      const mins = Math.floor(info.duration / 60);
+      const secs = info.duration % 60;
+      const durationText = `${mins}:${secs.toString().padStart(2, '0')}`;
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        sender_id: user.id,
+        message_type: 'text',
+        content: info.answered
+          ? `${endedCallType === 'video' ? '🎥' : '📞'} Звонок ${durationText}`
+          : `${endedCallType === 'video' ? '🎥' : '📞'} Пропущенный звонок`,
+      } as never);
+    }
+  };
+
   if (callType) {
     return (
       <VideoCall
@@ -1100,7 +1157,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         isCaller={isCaller}
         callId={activeCallId}
         initialStream={pendingCallStreamRef.current}
-        onEnd={() => { pendingCallStreamRef.current = null; setCallType(null); setIsCaller(false); setActiveCallId(null); setCallPeerId(''); }}
+        onEnd={finishCall}
       />
     );
   }

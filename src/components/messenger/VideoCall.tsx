@@ -12,7 +12,7 @@ interface VideoCallProps {
   isCaller: boolean;
   callId?: string | null;
   initialStream?: MediaStream | null;
-  onEnd: () => void;
+  onEnd: (info: { duration: number; answered: boolean }) => void;
 }
 
 type CallSignalRow = {
@@ -95,6 +95,11 @@ const ICE_SERVERS: RTCConfiguration = {
   rtcpMuxPolicy: 'require',
 };
 
+const RELAY_ICE_SERVERS: RTCConfiguration = {
+  ...ICE_SERVERS,
+  iceTransportPolicy: 'relay',
+};
+
 const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, callId, initialStream, onEnd }: VideoCallProps) => {
   const { user } = useAuth();
   const [isMuted, setIsMuted] = useState(false);
@@ -116,6 +121,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const lastInboundAudioBytesRef = useRef(0);
   const lastRepairRequestAtRef = useRef(0);
   const connectedAtRef = useRef(0);
+  const answeredRef = useRef(false);
   const callIdRef = useRef(callId || crypto.randomUUID());
 
   const sendSignal = useCallback(async (type: string, data: object) => {
@@ -143,16 +149,25 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     lastInboundAudioBytesRef.current = 0;
     lastRepairRequestAtRef.current = 0;
     connectedAtRef.current = 0;
+    answeredRef.current = false;
+  }, []);
+
+  const getCallInfo = useCallback(() => {
+    const duration = answeredRef.current && connectedAtRef.current
+      ? Math.max(1, Math.floor((Date.now() - connectedAtRef.current) / 1000))
+      : 0;
+    return { duration, answered: answeredRef.current };
   }, []);
 
   const hangUp = useCallback(() => {
     if (endedRef.current) return;
     endedRef.current = true;
+    const info = getCallInfo();
     sendSignal('hang-up', {});
     cleanup();
     setStatus('ended');
-    onEnd();
-  }, [sendSignal, cleanup, onEnd]);
+    onEnd(info);
+  }, [sendSignal, cleanup, onEnd, getCallInfo]);
 
   const addIceCandidate = useCallback(async (candidate: RTCIceCandidateInit) => {
     const pc = pcRef.current;
@@ -182,6 +197,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
 
     iceRestartAttemptsRef.current += 1;
     relayRestartedRef.current = true;
+    pc.setConfiguration(RELAY_ICE_SERVERS);
     pc.restartIce();
     const offer = await pc.createOffer({ iceRestart: true, offerToReceiveAudio: true, offerToReceiveVideo: isVideo });
     await pc.setLocalDescription(offer);
@@ -253,6 +269,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         remoteVideoRef.current.srcObject = e.streams[0];
         remoteVideoRef.current.volume = 1;
         remoteVideoRef.current.play().catch(() => undefined);
+        answeredRef.current = true;
         setStatus('connected');
       }
     };
@@ -275,6 +292,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     pc.onconnectionstatechange = () => {
       console.log('Connection state:', pc.connectionState);
       if (pc.connectionState === 'connected') {
+        answeredRef.current = true;
         setStatus('connected');
         if (!connectedAtRef.current) connectedAtRef.current = Date.now();
         if (!audioStatsTimerRef.current) {
@@ -342,9 +360,9 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       }
     } catch (err) {
       console.error('Failed to start call:', err);
-      onEnd();
+      onEnd(getCallInfo());
     }
-  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId, isVideo, flushCandidates, fetchMissedIceCandidates]);
+  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId, isVideo, flushCandidates, fetchMissedIceCandidates, getCallInfo]);
 
   const startAsCallee = useCallback(async () => {
     try {
@@ -374,12 +392,12 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
 
       if (!offer) {
         console.error('No offer found');
-        onEnd();
+        onEnd(getCallInfo());
         return;
       }
 
       if (!isSessionDescription(offer.signal_data)) {
-        onEnd();
+        onEnd(getCallInfo());
         return;
       }
       await pc.setRemoteDescription(new RTCSessionDescription(offer.signal_data));
@@ -393,9 +411,9 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       await fetchMissedIceCandidates();
     } catch (err) {
       console.error('Failed to setup call:', err);
-      onEnd();
+      onEnd(getCallInfo());
     }
-  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal, flushCandidates, fetchMissedIceCandidates]);
+  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal, flushCandidates, fetchMissedIceCandidates, getCallInfo]);
 
   const handleSignal = useCallback(async (signal: CallSignalRow) => {
     if (signal.conversation_id !== conversationId) return;
@@ -431,15 +449,16 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       } else if (signal.signal_type === 'hang-up') {
         if (!endedRef.current) {
           endedRef.current = true;
+          const info = getCallInfo();
           cleanup();
           setStatus('ended');
-          onEnd();
+          onEnd(info);
         }
       }
     } catch (err) {
       console.error('Signal handling error:', err);
     }
-  }, [conversationId, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates, restartIceWithOffer, cleanup, onEnd]);
+  }, [conversationId, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates, restartIceWithOffer, cleanup, onEnd, getCallInfo]);
 
   // Listen for signals via realtime
   useEffect(() => {
