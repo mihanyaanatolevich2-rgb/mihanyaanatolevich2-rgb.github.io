@@ -263,6 +263,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
         remoteVideoRef.current.srcObject = e.streams[0];
         remoteVideoRef.current.volume = 1;
         remoteVideoRef.current.play().catch(() => undefined);
+        answeredRef.current = true;
         setStatus('connected');
       }
     };
@@ -352,9 +353,9 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       }
     } catch (err) {
       console.error('Failed to start call:', err);
-      onEnd();
+      onEnd(getCallInfo());
     }
-  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId, isVideo, flushCandidates, fetchMissedIceCandidates]);
+  }, [setupPeerConnection, sendSignal, onEnd, user, conversationId, isVideo, flushCandidates, fetchMissedIceCandidates, getCallInfo]);
 
   const startAsCallee = useCallback(async () => {
     try {
@@ -384,12 +385,12 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
 
       if (!offer) {
         console.error('No offer found');
-        onEnd();
+        onEnd(getCallInfo());
         return;
       }
 
       if (!isSessionDescription(offer.signal_data)) {
-        onEnd();
+        onEnd(getCallInfo());
         return;
       }
       await pc.setRemoteDescription(new RTCSessionDescription(offer.signal_data));
@@ -403,9 +404,9 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       await fetchMissedIceCandidates();
     } catch (err) {
       console.error('Failed to setup call:', err);
-      onEnd();
+      onEnd(getCallInfo());
     }
-  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal, flushCandidates, fetchMissedIceCandidates]);
+  }, [setupPeerConnection, onEnd, user, conversationId, sendSignal, flushCandidates, fetchMissedIceCandidates, getCallInfo]);
 
   const handleSignal = useCallback(async (signal: CallSignalRow) => {
     if (signal.conversation_id !== conversationId) return;
@@ -441,15 +442,16 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
       } else if (signal.signal_type === 'hang-up') {
         if (!endedRef.current) {
           endedRef.current = true;
+          const info = getCallInfo();
           cleanup();
           setStatus('ended');
-          onEnd();
+          onEnd(info);
         }
       }
     } catch (err) {
       console.error('Signal handling error:', err);
     }
-  }, [conversationId, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates, restartIceWithOffer, cleanup, onEnd]);
+  }, [conversationId, isCaller, sendSignal, addIceCandidate, flushCandidates, fetchMissedIceCandidates, restartIceWithOffer, cleanup, onEnd, getCallInfo]);
 
   // Listen for signals via realtime
   useEffect(() => {
