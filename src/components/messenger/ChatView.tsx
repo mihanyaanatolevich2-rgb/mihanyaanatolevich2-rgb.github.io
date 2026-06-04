@@ -66,6 +66,14 @@ interface ConversationLookup {
   avatar_url?: string | null;
 }
 
+interface CallSignalRow {
+  conversation_id: string;
+  sender_id: string;
+  signal_type: string;
+  signal_data: { isVideo?: boolean } | null;
+  call_id: string;
+}
+
 interface ChatViewProps {
   conversationId: string;
   onBack: () => void;
@@ -557,7 +565,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
   useEffect(() => {
     if (!user || isGroup) return;
 
-    const handleIncomingSignal = (signal: any) => {
+    const handleIncomingSignal = (signal: CallSignalRow) => {
       if (signal.conversation_id !== conversationId) return;
       if (signal.signal_type === 'hang-up') {
         setIncomingCall(current => current?.callId === signal.call_id ? null : current);
@@ -580,7 +588,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         .order('created_at', { ascending: false })
         .limit(12);
 
-      [...((data as any[]) || [])].reverse().forEach(handleIncomingSignal);
+      [...((data as unknown as CallSignalRow[]) || [])].reverse().forEach(handleIncomingSignal);
     };
 
     pollIncomingSignals();
@@ -594,7 +602,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         table: 'call_signals',
         filter: `receiver_id=eq.${user.id}`,
       }, (payload) => {
-        handleIncomingSignal(payload.new as any);
+        handleIncomingSignal(payload.new as CallSignalRow);
       })
       .subscribe();
 
