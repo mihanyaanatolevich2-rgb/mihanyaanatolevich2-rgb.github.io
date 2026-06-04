@@ -1090,6 +1090,30 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
     setIncomingCall(null);
   };
 
+  const finishCall = async (info: { duration: number; answered: boolean }) => {
+    pendingCallStreamRef.current = null;
+    const shouldSaveCallMessage = isCaller && user && callType;
+    const endedCallType = callType;
+    setCallType(null);
+    setIsCaller(false);
+    setActiveCallId(null);
+    setCallPeerId('');
+
+    if (shouldSaveCallMessage && endedCallType) {
+      const mins = Math.floor(info.duration / 60);
+      const secs = info.duration % 60;
+      const durationText = `${mins}:${secs.toString().padStart(2, '0')}`;
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        sender_id: user.id,
+        message_type: 'text',
+        content: info.answered
+          ? `${endedCallType === 'video' ? '🎥' : '📞'} Звонок ${durationText}`
+          : `${endedCallType === 'video' ? '🎥' : '📞'} Пропущенный звонок`,
+      } as never);
+    }
+  };
+
   if (callType) {
     return (
       <VideoCall
@@ -1100,7 +1124,7 @@ const ChatView = ({ conversationId, onBack }: ChatViewProps) => {
         isCaller={isCaller}
         callId={activeCallId}
         initialStream={pendingCallStreamRef.current}
-        onEnd={() => { pendingCallStreamRef.current = null; setCallType(null); setIsCaller(false); setActiveCallId(null); setCallPeerId(''); }}
+        onEnd={finishCall}
       />
     );
   }
