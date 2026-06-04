@@ -95,6 +95,11 @@ const ICE_SERVERS: RTCConfiguration = {
   rtcpMuxPolicy: 'require',
 };
 
+const RELAY_ICE_SERVERS: RTCConfiguration = {
+  ...ICE_SERVERS,
+  iceTransportPolicy: 'relay',
+};
+
 const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, callId, initialStream, onEnd }: VideoCallProps) => {
   const { user } = useAuth();
   const [isMuted, setIsMuted] = useState(false);
@@ -192,6 +197,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
 
     iceRestartAttemptsRef.current += 1;
     relayRestartedRef.current = true;
+    pc.setConfiguration(RELAY_ICE_SERVERS);
     pc.restartIce();
     const offer = await pc.createOffer({ iceRestart: true, offerToReceiveAudio: true, offerToReceiveVideo: isVideo });
     await pc.setLocalDescription(offer);
