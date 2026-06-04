@@ -12,7 +12,7 @@ interface VideoCallProps {
   isCaller: boolean;
   callId?: string | null;
   initialStream?: MediaStream | null;
-  onEnd: () => void;
+  onEnd: (info: { duration: number; answered: boolean }) => void;
 }
 
 type CallSignalRow = {
@@ -116,6 +116,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
   const lastInboundAudioBytesRef = useRef(0);
   const lastRepairRequestAtRef = useRef(0);
   const connectedAtRef = useRef(0);
+  const answeredRef = useRef(false);
   const callIdRef = useRef(callId || crypto.randomUUID());
 
   const sendSignal = useCallback(async (type: string, data: object) => {
@@ -143,16 +144,25 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     lastInboundAudioBytesRef.current = 0;
     lastRepairRequestAtRef.current = 0;
     connectedAtRef.current = 0;
+    answeredRef.current = false;
+  }, []);
+
+  const getCallInfo = useCallback(() => {
+    const duration = answeredRef.current && connectedAtRef.current
+      ? Math.max(1, Math.floor((Date.now() - connectedAtRef.current) / 1000))
+      : 0;
+    return { duration, answered: answeredRef.current };
   }, []);
 
   const hangUp = useCallback(() => {
     if (endedRef.current) return;
     endedRef.current = true;
+    const info = getCallInfo();
     sendSignal('hang-up', {});
     cleanup();
     setStatus('ended');
-    onEnd();
-  }, [sendSignal, cleanup, onEnd]);
+    onEnd(info);
+  }, [sendSignal, cleanup, onEnd, getCallInfo]);
 
   const addIceCandidate = useCallback(async (candidate: RTCIceCandidateInit) => {
     const pc = pcRef.current;
