@@ -286,6 +286,7 @@ const VideoCall = ({ conversationId, partnerId, partnerName, isVideo, isCaller, 
     pc.onconnectionstatechange = () => {
       console.log('Connection state:', pc.connectionState);
       if (pc.connectionState === 'connected') {
+        answeredRef.current = true;
         setStatus('connected');
         if (!connectedAtRef.current) connectedAtRef.current = Date.now();
         if (!audioStatsTimerRef.current) {
